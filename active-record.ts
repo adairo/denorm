@@ -26,8 +26,25 @@ export default abstract class ActiveRecord {
 
   static find(id: number | string) {
     return this.query({
-      text: `SELECT * FROM ${this.tableName} WHERE ${this.tableName}.id = $id`,
-      args: { id }
+      text: `SELECT * FROM ${this.tableName} WHERE ${this.tableName}.id = $1`,
+      args: [id],
+    });
+  }
+
+  static update(id: number | string, data: Record<string, string | number>) {
+    const set = (column: string, index: number) => `${column} = $${index}`;
+    const argOffset = 2;
+
+    const entries = Object.entries(data);
+    const updatedFields = entries.map((entry) => entry.at(0) as string).map(
+      (column, index) => set(column, index + argOffset), // start at 2
+    ).join(",");
+    const args = [id].concat(entries.map((entry) => entry.at(1) as string))
+
+    return this.query({
+      text:
+        `UPDATE ${this.tableName} SET ${updatedFields} WHERE ${this.tableName}.id = $1`,
+      args,
     });
   }
 
