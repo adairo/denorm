@@ -17,16 +17,22 @@ export default abstract class ActiveRecord {
     );
 
     return this.query({
-      text: `INSERT INTO ${this.tableName} (${columnNames.join(",")}) VALUES (${
-        columnParameterList.join(",")
-      })`,
+      text: `
+        INSERT INTO ${this.tableName} 
+          (${columnNames.join(",")}) 
+          VALUES (${columnParameterList.join(",")})
+        RETURNING *
+      `,
       args: columnValues,
     });
   }
 
   static find(id: number | string) {
     return this.query({
-      text: `SELECT * FROM ${this.tableName} WHERE ${this.tableName}.id = $1`,
+      text: `
+        SELECT *
+        FROM ${this.tableName}
+        WHERE ${this.tableName}.id = $1`,
       args: [id],
     });
   }
@@ -39,12 +45,24 @@ export default abstract class ActiveRecord {
     const updatedFields = entries.map((entry) => entry.at(0) as string).map(
       (column, index) => set(column, index + argOffset), // start at 2
     ).join(",");
-    const args = [id].concat(entries.map((entry) => entry.at(1) as string))
+    const args = [id].concat(entries.map((entry) => entry.at(1) as string));
 
     return this.query({
-      text:
-        `UPDATE ${this.tableName} SET ${updatedFields} WHERE ${this.tableName}.id = $1`,
+      text:`
+        UPDATE ${this.tableName}
+        SET ${updatedFields}
+        WHERE ${this.tableName}.id = $1
+        RETURNING *`,
       args,
+    });
+  }
+
+  static delete(id: number | string) {
+    return this.query({
+      text: `
+        DELETE FROM ${this.tableName}
+        WHERE ${this.tableName}.id = $1`,
+      args: [id],
     });
   }
 
