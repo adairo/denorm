@@ -93,45 +93,85 @@ import client from "./db.ts";
   }
 } */
 
-function createModel<Shape>(modelName: string) {
-  abstract class Model implements Model {
-    static readonly modelName: string = modelName;
+class User extends createModel("User", {
+  columns: {
+    firstName: { type: "string", allowNull: true },
+    lastName: "string",
+    birthDate: "date",
+  },
+}) {
+  get fullName(): string {
+    return this.firstName + this.lastName;
+  }
+}
 
-    constructor(public modelName: string, public modelDefinition: Shape) {}
-    static build(values: Partial<Shape>) {
-      return this;
+const user = User.build({ firstName: "Adair", lastName: "Reyes" });
+console.log(user.fullName)
+
+type Constructor<T> = new (...args: any[]) => T;
+
+function createModel<Definition extends ModelDefinition>(
+  modelName: string,
+  modelDefinition: Definition,
+) {
+  class AbstractModel {
+    static modelName: string = modelName;
+    static modelDefinition: Definition = modelDefinition;
+
+    private constructor(private dataValues: TranslateDefinition<Definition>) {
     }
+
+    static build<T>(
+      // deno-lint-ignore no-explicit-any
+      this: new (...args: any[]) => T,
+      values: Partial<TranslateDefinition<Definition>>,
+    ): T & TranslateDefinition<Definition> {
+      return new this(values) as any;
+    }
+
+    save() {}
   }
 
-  return Model;
+  return AbstractModel as unknown as
+    & typeof AbstractModel
+    & Constructor<
+      TranslateDefinition<Definition>
+    >;
+}
+
+interface Model<Definition extends ModelDefinition = { columns: {} }> {
+  new (dataValues: Partial<Definition["columns"]>): {};
+  readonly modelName: string;
+  build(
+    values: Partial<TranslateDefinition<Definition>>,
+  ): ReturnType<typeof createModel>;
 }
 
 type TypeMap = {
   "string": string;
   "number": number;
   "boolean": boolean;
+  [dataType: `date${string | undefined}`]: Date;
+  "timestamp": Date;
 };
 
 type ColumnType = keyof TypeMap;
 
-type TranslateDefinition<TDef extends ModelDefinition> = {
-  [Key in keyof TDef["columns"]]: TDef["columns"][Key] extends ColumnType
-    ? TypeMap[TDef["columns"][Key]]
-    : TDef["columns"][Key] extends { type: ColumnType }
-      ? TypeMap[TDef["columns"][Key]["type"]]
-    : never;
-};
-
-type Model<TDefinition extends ModelDefinition = { columns: {} }> = {
-  new (): {};
-  readonly modelName: string;
-  build(values: Partial<TranslateDefinition<TDefinition>>): any;
+type TranslateDefinition<Definition extends ModelDefinition> = {
+  [Col in keyof Definition["columns"]]: Definition["columns"][Col] extends
+    ColumnType ? TypeMap[Definition["columns"][Col]]
+    : Definition["columns"][Col] extends { type: ColumnType }
+      ? TypeMap[Definition["columns"][Col]["type"]]
+    : "TIPO raro fuchi";
 };
 
 type ModelMap = Record<string, Model>;
 
 type ModelDefinition = {
-  columns: Record<string, ColumnType | { type: ColumnType }>;
+  columns: Record<
+    string,
+    ColumnType | { type: ColumnType; allowNull?: boolean }
+  >;
 };
 
 class ORM<TMap extends ModelMap = {}> {
@@ -145,24 +185,8 @@ class ORM<TMap extends ModelMap = {}> {
   ): ORM<TMap & Record<TName, Model<TModelDefinition>>> {
     this.models[modelName] = createModel<TModelDefinition>(
       modelName,
+      modelDefinition,
     ) as any;
     return this as any;
   }
 }
-
-const orm = new ORM();
-
-export const builded = orm.defineModel(
-  "User",
-  {
-    columns: {
-      first_name: { type: "string" },
-      last_name: "string",
-    },
-  },
-);
-
-class User extends builded.models.User {
-}
-
-builded.models.User.build({ first_name: "Adair", last_name: "Reyes" });
