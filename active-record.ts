@@ -93,32 +93,49 @@ import client from "./db.ts";
   }
 } */
 
-class User extends createModel("User", {
+const AbstractUser = createModel("User", {
   columns: {
     firstName: { type: "string", allowNull: true },
     lastName: "string",
     birthDate: "date",
+    age: "number",
   },
-}) {
-  get fullName(): string {
-    return this.firstName + this.lastName;
+});
+
+class User extends AbstractUser {
+  get fullCredentials(): string {
+    return `${this.firstName} ${this.lastName}, ${
+      this.birthDate ? this.birthDate.toLocaleDateString() : "unknown birthdate"
+    }`;
   }
 }
 
-const user = User.build({ firstName: "Adair", lastName: "Reyes" });
-console.log(user.fullName)
+const user = User.build({
+  firstName: "Adair",
+  lastName: "Reyes",
+  birthDate: new Date(),
+});
+console.log(user.fullCredentials);
 
+// deno-lint-ignore no-explicit-any
 type Constructor<T> = new (...args: any[]) => T;
 
 function createModel<Definition extends ModelDefinition>(
   modelName: string,
   modelDefinition: Definition,
 ) {
-  class AbstractModel {
+  abstract class AbstractModel {
     static modelName: string = modelName;
     static modelDefinition: Definition = modelDefinition;
 
     private constructor(private dataValues: TranslateDefinition<Definition>) {
+      Object.keys(AbstractModel.modelDefinition.columns).forEach((columnKey) =>
+        Object.defineProperty(this, columnKey, {
+          get() {
+            return dataValues[columnKey];
+          },
+        })
+      );
     }
 
     static build<T>(
