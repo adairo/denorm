@@ -93,29 +93,26 @@ import client from "./db.ts";
   }
 } */
 
-const AbstractUser = createModel("User", {
+const UserModel = createModel("User", {
+  tableName: "users",
   columns: {
-    firstName: { type: "string", allowNull: true },
-    lastName: "string",
-    birthDate: "date",
-    age: "number",
+    first_name: { type: "string", allowNull: true },
+    last_name: "string",
   },
 });
 
-class User extends AbstractUser {
-  get fullCredentials(): string {
-    return `${this.firstName} ${this.lastName}, ${
-      this.birthDate ? this.birthDate.toLocaleDateString() : "unknown birthdate"
-    }`;
+class User extends UserModel {
+  get full_name(): string {
+    return `${this.first_name} ${this.last_name}`;
   }
 }
 
 const user = User.build({
-  firstName: "Adair",
-  lastName: "Reyes",
-  birthDate: new Date(),
-});
-console.log(user.fullCredentials);
+  first_name: "Adair",
+  last_name: "Reyes",
+})
+
+user.save("users").then(console.log).then(() => console.log(user.full_name))
 
 // deno-lint-ignore no-explicit-any
 type Constructor<T> = new (...args: any[]) => T;
@@ -124,18 +121,23 @@ function createModel<Definition extends ModelDefinition>(
   modelName: string,
   modelDefinition: Definition,
 ) {
-  abstract class AbstractModel {
+  abstract class Model {
     static modelName: string = modelName;
+    static tableName: string = modelDefinition.tableName;
     static modelDefinition: Definition = modelDefinition;
 
     private constructor(private dataValues: TranslateDefinition<Definition>) {
-      Object.keys(AbstractModel.modelDefinition.columns).forEach((columnKey) =>
+      Object.keys(Model.modelDefinition.columns).forEach((columnKey) =>
         Object.defineProperty(this, columnKey, {
           get() {
             return dataValues[columnKey];
           },
         })
       );
+    }
+
+    private static query(options: QueryObjectOptions) {
+      return client.queryObject(options).then((result) => result.rows);
     }
 
     static build<T>(
@@ -146,11 +148,28 @@ function createModel<Definition extends ModelDefinition>(
       return new this(values) as any;
     }
 
-    save() {}
+    save(): Promise<unknown> {
+      const entries = Object.entries(this.dataValues);
+      const columnNames = entries.map((entry) => entry.at(0));
+      const columnValues = entries.map((entry) => entry.at(1));
+      const columnParameterList = columnValues.map((_k, index) =>
+        `$${index + 1}`
+      );
+
+      return Model.query({
+        text: `
+          INSERT INTO ${Model.tableName}
+            (${columnNames.join(",")})
+            VALUES (${columnParameterList.join(",")})
+          RETURNING *
+        `,
+        args: columnValues,
+      });
+    }
   }
 
-  return AbstractModel as unknown as
-    & typeof AbstractModel
+  return Model as unknown as
+    & typeof Model
     & Constructor<
       TranslateDefinition<Definition>
     >;
@@ -185,6 +204,7 @@ type TranslateDefinition<Definition extends ModelDefinition> = {
 type ModelMap = Record<string, Model>;
 
 type ModelDefinition = {
+  tableName: string;
   columns: Record<
     string,
     ColumnType | { type: ColumnType; allowNull?: boolean }
