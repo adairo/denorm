@@ -106,21 +106,36 @@ function createModel<Shape>(modelName: string) {
   return Model;
 }
 
+type TypeMap = {
+  "string": string;
+  "number": number;
+  "boolean": boolean;
+};
+
+type ColumnType = keyof TypeMap;
+
+type TranslateDefinition<TDef extends ModelDefinition> = {
+  [Key in keyof TDef["columns"]]: TDef["columns"][Key] extends ColumnType
+    ? TypeMap[TDef["columns"][Key]]
+    : TDef["columns"][Key] extends { type: ColumnType }
+      ? TypeMap[TDef["columns"][Key]["type"]]
+    : never;
+};
+
 type Model<TDefinition extends ModelDefinition = { columns: {} }> = {
   new (): {};
   readonly modelName: string;
-  build(values: Partial<TDefinition["columns"]>): string;
+  build(values: Partial<TranslateDefinition<TDefinition>>): any;
 };
 
 type ModelMap = Record<string, Model>;
 
 type ModelDefinition = {
-  columns: Record<string, string | { type: "string" | "number" }>;
+  columns: Record<string, ColumnType | { type: ColumnType }>;
 };
 
 class ORM<TMap extends ModelMap = {}> {
   models: TMap = {} as TMap;
-
   defineModel<
     TName extends string,
     TModelDefinition extends ModelDefinition,
@@ -141,7 +156,8 @@ export const builded = orm.defineModel(
   "User",
   {
     columns: {
-      first_name: "string",
+      first_name: { type: "string" },
+      last_name: "string",
     },
   },
 );
@@ -149,4 +165,4 @@ export const builded = orm.defineModel(
 class User extends builded.models.User {
 }
 
-builded.models.User.build({ first_name: "string" });
+builded.models.User.build({ first_name: "Adair", last_name: "Reyes" });
