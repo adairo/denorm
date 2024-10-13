@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-explicit-any
 import type { QueryObjectOptions } from "https://deno.land/x/postgres@v0.19.3/mod.ts";
 import client from "./db.ts";
 
@@ -109,11 +110,12 @@ class User extends UserModel {
 }
 
 const user = await User.build({
-  first_name: "Adair",
-  last_name: "Reyes",
-}).save()
+  first_name: "Adairo",
+  last_name: "Reyes Reyes",
+}).save();
 
-
+const sameUser = await User.find(8847);
+console.log(sameUser);
 
 type ModelConstructor<Model, Definition> =
   & Model
@@ -123,7 +125,6 @@ type ModelConstructor<Model, Definition> =
 
 type InitializedModel<Model, Definition> = TranslateDefinition<Definition>;
 
-// deno-lint-ignore no-explicit-any
 type Constructor<T> = new (...args: any[]) => T;
 
 function createModel<Definition extends ModelDefinition>(
@@ -158,6 +159,19 @@ function createModel<Definition extends ModelDefinition>(
       values: TranslateDefinition<Definition>,
     ): Model {
       return new this(values);
+    }
+
+    static find<Model>(
+      this: Constructor<Model>,
+      id: number,
+    ): Promise<Model & { id: number } | null> {
+      return query({
+        text: `
+          SELECT *
+          FROM ${this.tableName}
+          WHERE ${this.tableName}.id = $1`,
+        args: [id],
+      }).then(([row]) => row ? this.build(row) : null);
     }
 
     save<Model>(this: Model): Promise<Model & { id: number }> {
