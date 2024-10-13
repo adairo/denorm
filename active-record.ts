@@ -1,7 +1,8 @@
 import type { QueryObjectOptions } from "https://deno.land/x/postgres@v0.19.3/mod.ts";
 import client from "./db.ts";
 
-/* export default abstract class ActiveRecord {
+/*
+  export default abstract class ActiveRecord {
   private static columnMap: ModelMap;
   private static tableName: string;
 
@@ -96,7 +97,7 @@ import client from "./db.ts";
 const UserModel = createModel("User", {
   tableName: "users",
   columns: {
-    first_name: { type: "string", allowNull: true },
+    first_name: { type: "string", notNull: true },
     last_name: "string",
   },
 });
@@ -107,12 +108,20 @@ class User extends UserModel {
   }
 }
 
-const user = User.build({
+const user = await User.build({
   first_name: "Adair",
   last_name: "Reyes",
-})
+}).save()
 
-user.save("users").then(console.log).then(() => console.log(user.full_name))
+
+
+type ModelConstructor<Model, Definition> =
+  & Model
+  & Constructor<
+    TranslateDefinition<Definition>
+  >;
+
+type InitializedModel<Model, Definition> = TranslateDefinition<Definition>;
 
 // deno-lint-ignore no-explicit-any
 type Constructor<T> = new (...args: any[]) => T;
@@ -125,30 +134,33 @@ function createModel<Definition extends ModelDefinition>(
     static modelName: string = modelName;
     static tableName: string = modelDefinition.tableName;
     static modelDefinition: Definition = modelDefinition;
+    private dataValues: TranslateDefinition<Definition>;
+    #id: number | null;
 
-    private constructor(private dataValues: TranslateDefinition<Definition>) {
+    get id() {
+      return this.#id;
+    }
+
+    private constructor(dataValues: TranslateDefinition<Definition>) {
+      this.dataValues = dataValues;
+
       Object.keys(Model.modelDefinition.columns).forEach((columnKey) =>
         Object.defineProperty(this, columnKey, {
           get() {
-            return dataValues[columnKey];
+            return this.dataValues[columnKey];
           },
         })
       );
     }
 
-    private static query(options: QueryObjectOptions) {
-      return client.queryObject(options).then((result) => result.rows);
+    static build<Model>(
+      this: Constructor<Model>,
+      values: TranslateDefinition<Definition>,
+    ): Model {
+      return new this(values);
     }
 
-    static build<T>(
-      // deno-lint-ignore no-explicit-any
-      this: new (...args: any[]) => T,
-      values: Partial<TranslateDefinition<Definition>>,
-    ): T & TranslateDefinition<Definition> {
-      return new this(values) as any;
-    }
-
-    save(): Promise<unknown> {
+    save<Model>(this: Model): Promise<Model & { id: number }> {
       const entries = Object.entries(this.dataValues);
       const columnNames = entries.map((entry) => entry.at(0));
       const columnValues = entries.map((entry) => entry.at(1));
@@ -156,31 +168,19 @@ function createModel<Definition extends ModelDefinition>(
         `$${index + 1}`
       );
 
-      return Model.query({
+      return query({
         text: `
           INSERT INTO ${Model.tableName}
             (${columnNames.join(",")})
             VALUES (${columnParameterList.join(",")})
-          RETURNING *
+          RETURNING id
         `,
         args: columnValues,
-      });
+      }).then(([row]) => this.#id = row.id).then(() => this);
     }
   }
 
-  return Model as unknown as
-    & typeof Model
-    & Constructor<
-      TranslateDefinition<Definition>
-    >;
-}
-
-interface Model<Definition extends ModelDefinition = { columns: {} }> {
-  new (dataValues: Partial<Definition["columns"]>): {};
-  readonly modelName: string;
-  build(
-    values: Partial<TranslateDefinition<Definition>>,
-  ): ReturnType<typeof createModel>;
+  return Model as ModelConstructor<typeof Model, Definition>;
 }
 
 type TypeMap = {
@@ -201,17 +201,20 @@ type TranslateDefinition<Definition extends ModelDefinition> = {
     : "TIPO raro fuchi";
 };
 
-type ModelMap = Record<string, Model>;
+type ModelMap = Record<string, InitializedModel>;
 
 type ModelDefinition = {
   tableName: string;
   columns: Record<
     string,
-    ColumnType | { type: ColumnType; allowNull?: boolean }
+    ColumnType | { type: ColumnType; notNull?: boolean }
   >;
 };
 
-class ORM<TMap extends ModelMap = {}> {
+function query(options: QueryObjectOptions) {
+  return client.queryObject(options).then((result) => result.rows);
+}
+/* class ORM<TMap extends ModelMap = {}> {
   models: TMap = {} as TMap;
   defineModel<
     TName extends string,
@@ -227,3 +230,12 @@ class ORM<TMap extends ModelMap = {}> {
     return this as any;
   }
 }
+ */
+
+/* interface Model<Definition extends ModelDefinition = { columns: {} }> {
+  new (dataValues: Partial<Definition["columns"]>): {};
+  readonly modelName: string;
+  build(
+    values: Partial<TranslateDefinition<Definition>>,
+  ): ReturnType<typeof createModel>;
+} */
