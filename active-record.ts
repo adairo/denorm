@@ -41,7 +41,7 @@ import client from "./db.ts";
     this.tableName = options?.tableName ?? this.name; // class name
   }
 } */
-
+type WithId = { id: number };
 const UserModel = createModel("User", {
   tableName: "users",
   columns: {
@@ -56,12 +56,16 @@ class User extends UserModel {
   }
 }
 
-const user = await User.create({
+const user = await new User({
   first_name: "Adairo",
   last_name: "Reyes Reyes",
+}).save();
+
+const { id } = await user.update({
+  first_name: "instance update",
 });
 
-console.log(user.id);
+console.log(await User.find(id));
 
 type ModelConstructor<Model, Definition extends ModelDefinition> =
   & Model
@@ -78,7 +82,7 @@ function createModel<Definition extends ModelDefinition>(
   modelName: string,
   modelDefinition: Definition,
 ) {
-  class Model {
+  abstract class Model {
     static modelName: string = modelName;
     static tableName: string = modelDefinition.tableName;
     static modelDefinition: Definition = modelDefinition;
@@ -101,35 +105,28 @@ function createModel<Definition extends ModelDefinition>(
       );
     }
 
-    // it needs to use the concrete method to include methods defined in the
-    // class that extends from the abstract model
-    static build<ConcreteModel extends Model>(
-      this: Constructor<ConcreteModel>,
-      values: TranslateDefinition<Definition>,
-    ): ConcreteModel & TranslateDefinition<Definition> {
-      return new this(values) as any;
-    }
-
     static create<ConcreteModel extends Model>(
       this: Constructor<ConcreteModel>,
       values: TranslateDefinition<Definition>,
     ) {
-      return new this(values).save()
+      return new this(values).save();
     }
 
-    static find<Model>(
-      this: Constructor<Model>,
+    static async find<ConcreteModel extends Model>(
+      this: Constructor<ConcreteModel>,
       id: number,
-    ): Promise<Model & { id: number } | null> {
-      return query({
+    ): Promise<ConcreteModel | null> {
+      const [row] = await query({
         text: `
           SELECT *
-          FROM ${this.tableName}
-          WHERE ${this.tableName}.id = $1`,
+          FROM ${Model.tableName}
+          WHERE ${Model.tableName}.id = $1`,
         args: [id],
-      }).then(([row]) => row ? this.build(row) : null);
+      });
+      return row ? new this(row) : null;
     }
 
+    // Make return as Model & {id: number}
     save() {
       const entries = Object.entries(this.dataValues);
       const columnNames = entries.map((entry) => entry.at(0));
@@ -149,18 +146,19 @@ function createModel<Definition extends ModelDefinition>(
       }).then(([row]) => this.#id = (row as any).id).then(() => this);
     }
 
-    update(data: Partial<TranslateDefinition<Definition>>) {
+    update(data: Partial<TranslateDefinition<Definition>>): Promise<WithId> {
+      if (this.id === null) {
+        throw new Error(
+          "This model instance is not initialized, did you forget to call Model.save() first?",
+        );
+      }
       return Model.update(this.id, data);
     }
-
-    /* reload(){
-      query()
-    } */
 
     static update(
       id: number | string,
       data: Partial<TranslateDefinition<Definition>>,
-    ) {
+    ): Promise<WithId> {
       const set = (column: string, index: number) => `${column} = $${index}`;
       const argOffset = 2;
 
@@ -175,9 +173,10 @@ function createModel<Definition extends ModelDefinition>(
           UPDATE ${this.tableName}
           SET ${updatedFields}
           WHERE ${this.tableName}.id = $1
+          RETURNING id
           `,
         args,
-      });
+      }).then(([row]) => row) as any;
     }
   }
   return Model as ModelConstructor<typeof Model, Definition>;
@@ -209,8 +208,8 @@ type ModelDefinition = {
   >;
 };
 
-function query(options: QueryObjectOptions) {
-  return client.queryObject(options).then((result) => result.rows);
+function query<T>(options: QueryObjectOptions) {
+  return client.queryObject<T>(options).then((result) => result.rows);
 }
 /* class ORM<TMap extends ModelMap = {}> {
   models: TMap = {} as TMap;
