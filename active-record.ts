@@ -61,11 +61,14 @@ const user = await new User({
   last_name: "Reyes Reyes",
 }).save();
 
-const { id } = await user.update({
-  first_name: "instance update",
+await user.update({
+  first_name: "updated",
 });
 
-console.log(await User.find(id));
+if (user.first_name !== "instance_update") {
+  throw new Error('Not updated yet')
+}
+
 
 type ModelConstructor<Model, Definition extends ModelDefinition> =
   & Model
@@ -144,6 +147,10 @@ function createModel<Definition extends ModelDefinition>(
         `,
         args: columnValues,
       }).then(([row]) => this.#id = (row as any).id).then(() => this);
+    }
+
+    reload() {
+
     }
 
     update(data: Partial<TranslateDefinition<Definition>>): Promise<WithId> {
