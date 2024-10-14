@@ -56,22 +56,21 @@ class User extends UserModel {
   }
 }
 
-const user = await User.build({
+const user = await User.create({
   first_name: "Adairo",
   last_name: "Reyes Reyes",
-}).save();
+});
 
-await User.update(user.id, { first_name: "Static update" });
-const refetchedUser = await User.find(user.id)
-console.log(refetchedUser)
+console.log(user.id);
 
-type ModelConstructor<Model, Definition> =
+type ModelConstructor<Model, Definition extends ModelDefinition> =
   & Model
   & Constructor<
     TranslateDefinition<Definition>
   >;
 
-type InitializedModel<Model, Definition> = TranslateDefinition<Definition>;
+type InitializedModel<Model, Definition extends ModelDefinition> =
+  TranslateDefinition<Definition>;
 
 type Constructor<T> = new (...args: any[]) => T;
 
@@ -79,18 +78,18 @@ function createModel<Definition extends ModelDefinition>(
   modelName: string,
   modelDefinition: Definition,
 ) {
-  abstract class Model {
+  class Model {
     static modelName: string = modelName;
     static tableName: string = modelDefinition.tableName;
     static modelDefinition: Definition = modelDefinition;
     private dataValues: TranslateDefinition<Definition>;
-    #id: number | null;
+    #id: number | null = null;
 
     get id() {
       return this.#id;
     }
 
-    private constructor(dataValues: TranslateDefinition<Definition>) {
+    constructor(dataValues: TranslateDefinition<Definition>) {
       this.dataValues = dataValues;
 
       Object.keys(Model.modelDefinition.columns).forEach((columnKey) =>
@@ -102,17 +101,20 @@ function createModel<Definition extends ModelDefinition>(
       );
     }
 
-    static build<Model>(
-      this: Constructor<Model>,
+    // it needs to use the concrete method to include methods defined in the
+    // class that extends from the abstract model
+    static build<ConcreteModel extends Model>(
+      this: Constructor<ConcreteModel>,
       values: TranslateDefinition<Definition>,
-    ): Model {
-      return new this(values);
+    ): ConcreteModel & TranslateDefinition<Definition> {
+      return new this(values) as any;
     }
 
-    static create<Model>(
+    static create<ConcreteModel extends Model>(
+      this: Constructor<ConcreteModel>,
       values: TranslateDefinition<Definition>,
     ) {
-      return this.build(values).save();
+      return new this(values).save()
     }
 
     static find<Model>(
@@ -128,7 +130,7 @@ function createModel<Definition extends ModelDefinition>(
       }).then(([row]) => row ? this.build(row) : null);
     }
 
-    save<Model>(this: Model): Promise<Model & { id: number }> {
+    save() {
       const entries = Object.entries(this.dataValues);
       const columnNames = entries.map((entry) => entry.at(0));
       const columnValues = entries.map((entry) => entry.at(1));
@@ -144,8 +146,16 @@ function createModel<Definition extends ModelDefinition>(
           RETURNING id
         `,
         args: columnValues,
-      }).then(([row]) => this.#id = row.id).then(() => this);
+      }).then(([row]) => this.#id = (row as any).id).then(() => this);
     }
+
+    update(data: Partial<TranslateDefinition<Definition>>) {
+      return Model.update(this.id, data);
+    }
+
+    /* reload(){
+      query()
+    } */
 
     static update(
       id: number | string,
@@ -190,8 +200,6 @@ type TranslateDefinition<Definition extends ModelDefinition> = {
       ? TypeMap[Definition["columns"][Col]["type"]]
     : "TIPO raro fuchi";
 };
-
-type ModelMap = Record<string, InitializedModel>;
 
 type ModelDefinition = {
   tableName: string;
