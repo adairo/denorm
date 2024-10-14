@@ -41,30 +41,18 @@ import client from "./db.ts";
     this.tableName = options?.tableName ?? this.name; // class name
   }
 } */
-type WithId = { id: number };
-const UserModel = createModel("User", {
-  tableName: "users",
-  columns: {
-    first_name: { type: "string", notNull: true },
-    last_name: "string",
-  },
-});
 
-class User extends UserModel {
-  get full_name(): string {
-    return `${this.first_name} ${this.last_name}`;
+function assertPersisted(
+  model: any,
+): asserts model is { id: number } {
+  if (!("id" in model)) {
+    throw new Error(
+      `This ${model.modelName} instance is not persisted yet, did you forget to call Model.save() first?`,
+    );
   }
 }
 
-const user = await User.build({ first_name: "Adair", last_name: "Reyes" }).save();
-
-await user.update({
-  first_name: "updated",
-});
-
-if (user.first_name !== "instance_update") {
-  throw new Error("Not updated yet");
-}
+type WithId = { id: number };
 
 type ModelConstructor<Model, Definition extends ModelDefinition> =
   & Model
@@ -72,12 +60,9 @@ type ModelConstructor<Model, Definition extends ModelDefinition> =
     TranslateDefinition<Definition>
   >;
 
-type InitializedModel<Model, Definition extends ModelDefinition> =
-  TranslateDefinition<Definition>;
-
 type Constructor<T> = new (...args: any[]) => T;
 
-function createModel<Definition extends ModelDefinition>(
+export function createModel<Definition extends ModelDefinition>(
   modelName: string,
   modelDefinition: Definition,
 ) {
@@ -86,25 +71,24 @@ function createModel<Definition extends ModelDefinition>(
     static tableName: string = modelDefinition.tableName;
     static modelDefinition: Definition = modelDefinition;
     private dataValues: Record<string, any>;
-    #id: number | null = null;
 
-    get id() {
-      return this.#id;
-    }
-
-    constructor(/* dataValues: TranslateDefinition<Definition> */) {
+    constructor() {
       this.dataValues = Object.create(null);
 
-      Object.keys(Model.modelDefinition.columns).forEach((columnKey) =>
+      ["id"].concat(Object.keys(Model.modelDefinition.columns)).forEach((
+        columnKey,
+      ) =>
         Object.defineProperty(this, columnKey, {
           get() {
-            return this.dataValues[columnKey];
+            return this.dataValues[columnKey] ?? null;
           },
+          enumerable: true,
+          configurable: true,
         })
       );
     }
 
-    protected setValues(dataValues: TranslateDefinition<Definition>) {
+    protected setDataValues(dataValues: TranslateDefinition<Definition>) {
       this.dataValues = { ...dataValues };
       return this;
     }
@@ -113,33 +97,44 @@ function createModel<Definition extends ModelDefinition>(
       this: Constructor<ConcreteModel>,
       values: TranslateDefinition<Definition>,
     ): ConcreteModel {
-      return new this().setValues(values) as any;
+      return new this().setDataValues(
+        Object.assign({ id: null }, values),
+      ) as any;
     }
 
     static create<ConcreteModel extends Model>(
       this: Constructor<ConcreteModel>,
       values: TranslateDefinition<Definition>,
-    ) {
-      return new this().setValues(values);
+    ): Promise<ConcreteModel> {
+      return Model.build(values).save() as any;
     }
 
     static async find<ConcreteModel extends Model>(
       this: Constructor<ConcreteModel>,
       id: number,
-    ): Promise<ConcreteModel | null> {
-      const [row] = await query({
+    ): Promise<ConcreteModel & { id: number }> {
+      const [row] = await Model.fetchDataValues(id);
+      if (row === null) {
+        throw new Error(`${Model.modelName} with id <${id}> not found`);
+      }
+
+      return new this().setDataValues(row as any) as any;
+    }
+
+    protected static fetchDataValues(id: number) {
+      return query({
         text: `
           SELECT *
           FROM ${Model.tableName}
           WHERE ${Model.tableName}.id = $1`,
         args: [id],
       });
-      return row ? new this(row) : null;
     }
 
     // Make return as Model & {id: number}
-    save() {
-      const entries = Object.entries(this.dataValues);
+    save(): Promise<this> {
+      const { id: _id, ...values } = this.dataValues;
+      const entries = Object.entries(values);
       const columnNames = entries.map((entry) => entry.at(0));
       const columnValues = entries.map((entry) => entry.at(1));
       const columnParameterList = columnValues.map((_k, index) =>
@@ -154,19 +149,24 @@ function createModel<Definition extends ModelDefinition>(
           RETURNING id
         `,
         args: columnValues,
-      }).then(([row]) => this.#id = (row as any).id).then(() => this);
+      }).then(([row]) =>
+        Object.defineProperty(this.dataValues, "id", {
+          value: (row as any).id,
+          enumerable: true,
+        })
+      ).then(() => this);
     }
 
     reload() {
+      assertPersisted(this);
+      return Model.fetchDataValues(this.id).then(([values]) =>
+        this.setDataValues(values as any)
+      ).then(() => this);
     }
 
     update(data: Partial<TranslateDefinition<Definition>>): Promise<WithId> {
-      if (this.id === null) {
-        throw new Error(
-          "This model instance is not initialized, did you forget to call Model.save() first?",
-        );
-      }
-      return Model.update(this.id, data);
+      assertPersisted(this);
+      return Model.update(this.id, data).then(() => this.reload());
     }
 
     static update(
