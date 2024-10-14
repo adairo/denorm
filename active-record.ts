@@ -3,59 +3,6 @@ import type { QueryObjectOptions } from "https://deno.land/x/postgres@v0.19.3/mo
 import client from "./db.ts";
 
 /*
-  export default abstract class ActiveRecord {
-  private static columnMap: ModelMap;
-  private static tableName: string;
-
-   constructor(public dataValues: Record<string, string>) {
-  }
-
-  private static query(options: QueryObjectOptions) {
-    return client.queryObject(options).then((result) => result.rows);
-  }
-
-  static create<TModel>(
-    this: (new () => TModel) & typeof ActiveRecord,
-    values: Record<string, string | number>,
-  ): Promise<TModel> {
-    const entries = Object.entries(values);
-    const columnNames = entries.map((entry) => entry.at(0));
-    const columnValues = entries.map((entry) => entry.at(1));
-    const columnParameterList = columnValues.map((_k, index) =>
-      `$${index + 1}`
-    );
-
-    return this.query({
-      text: `
-        INSERT INTO ${this.tableName}
-          (${columnNames.join(",")})
-          VALUES (${columnParameterList.join(",")})
-        RETURNING *
-      `,
-      args: columnValues,
-    }).then(([row]) => {
-      return new this();
-    });
-  }
-
-  static build<Model>(
-    this: new (values: any) => Model,
-    values: Record<string, any>,
-  ) {
-    const instance = new this(values);
-
-    return instance;
-  }
-
-  static find(id: number | string) {
-    return this.query({
-      text: `
-        SELECT *
-        FROM ${this.tableName}
-        WHERE ${this.tableName}.id = $1`,
-      args: [id],
-    });
-  }
 
   static update(id: number | string, data: Record<string, string | number>) {
     const set = (column: string, index: number) => `${column} = $${index}`;
@@ -114,8 +61,9 @@ const user = await User.build({
   last_name: "Reyes Reyes",
 }).save();
 
-const otherUser = await User.create({first_name: 'hello', last_name: 'there'})
-
+await User.update(user.id, { first_name: "Static update" });
+const refetchedUser = await User.find(user.id)
+console.log(refetchedUser)
 
 type ModelConstructor<Model, Definition> =
   & Model
@@ -198,8 +146,30 @@ function createModel<Definition extends ModelDefinition>(
         args: columnValues,
       }).then(([row]) => this.#id = row.id).then(() => this);
     }
-  }
 
+    static update(
+      id: number | string,
+      data: Partial<TranslateDefinition<Definition>>,
+    ) {
+      const set = (column: string, index: number) => `${column} = $${index}`;
+      const argOffset = 2;
+
+      const entries = Object.entries(data);
+      const updatedFields = entries.map((entry) => entry.at(0) as string).map(
+        (column, index) => set(column, index + argOffset), // start at 2
+      ).join(",");
+      const args = [id].concat(entries.map((entry) => entry.at(1) as string));
+
+      return query({
+        text: `
+          UPDATE ${this.tableName}
+          SET ${updatedFields}
+          WHERE ${this.tableName}.id = $1
+          `,
+        args,
+      });
+    }
+  }
   return Model as ModelConstructor<typeof Model, Definition>;
 }
 
