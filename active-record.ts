@@ -114,8 +114,8 @@ const user = await User.build({
   last_name: "Reyes Reyes",
 }).save();
 
-const sameUser = await User.find(8847);
-console.log(sameUser);
+const otherUser = await User.create({first_name: 'hello', last_name: 'there'})
+
 
 type ModelConstructor<Model, Definition> =
   & Model
@@ -159,6 +159,12 @@ function createModel<Definition extends ModelDefinition>(
       values: TranslateDefinition<Definition>,
     ): Model {
       return new this(values);
+    }
+
+    static create<Model>(
+      values: TranslateDefinition<Definition>,
+    ) {
+      return this.build(values).save();
     }
 
     static find<Model>(
