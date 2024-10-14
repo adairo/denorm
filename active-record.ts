@@ -56,19 +56,15 @@ class User extends UserModel {
   }
 }
 
-const user = await new User({
-  first_name: "Adairo",
-  last_name: "Reyes Reyes",
-}).save();
+const user = await User.build({ first_name: "Adair", last_name: "Reyes" }).save();
 
 await user.update({
   first_name: "updated",
 });
 
 if (user.first_name !== "instance_update") {
-  throw new Error('Not updated yet')
+  throw new Error("Not updated yet");
 }
-
 
 type ModelConstructor<Model, Definition extends ModelDefinition> =
   & Model
@@ -85,19 +81,19 @@ function createModel<Definition extends ModelDefinition>(
   modelName: string,
   modelDefinition: Definition,
 ) {
-  abstract class Model {
+  class Model {
     static modelName: string = modelName;
     static tableName: string = modelDefinition.tableName;
     static modelDefinition: Definition = modelDefinition;
-    private dataValues: TranslateDefinition<Definition>;
+    private dataValues: Record<string, any>;
     #id: number | null = null;
 
     get id() {
       return this.#id;
     }
 
-    constructor(dataValues: TranslateDefinition<Definition>) {
-      this.dataValues = dataValues;
+    constructor(/* dataValues: TranslateDefinition<Definition> */) {
+      this.dataValues = Object.create(null);
 
       Object.keys(Model.modelDefinition.columns).forEach((columnKey) =>
         Object.defineProperty(this, columnKey, {
@@ -108,11 +104,23 @@ function createModel<Definition extends ModelDefinition>(
       );
     }
 
+    protected setValues(dataValues: TranslateDefinition<Definition>) {
+      this.dataValues = { ...dataValues };
+      return this;
+    }
+
+    static build<ConcreteModel extends Model>(
+      this: Constructor<ConcreteModel>,
+      values: TranslateDefinition<Definition>,
+    ): ConcreteModel {
+      return new this().setValues(values) as any;
+    }
+
     static create<ConcreteModel extends Model>(
       this: Constructor<ConcreteModel>,
       values: TranslateDefinition<Definition>,
     ) {
-      return new this(values).save();
+      return new this().setValues(values);
     }
 
     static async find<ConcreteModel extends Model>(
@@ -150,7 +158,6 @@ function createModel<Definition extends ModelDefinition>(
     }
 
     reload() {
-
     }
 
     update(data: Partial<TranslateDefinition<Definition>>): Promise<WithId> {
