@@ -152,7 +152,7 @@ export function defineModel<Definition extends ModelDefinition>(
       return this;
     }
 
-    protected static fetchDataValues(id: number) {
+    private static fetchDataValues(id: number) {
       return query({
         text: `
           SELECT *
@@ -191,6 +191,10 @@ export function defineModel<Definition extends ModelDefinition>(
     async reload(): Promise<this & PersistedModel> {
       assertPersisted(this);
       const [values] = await Model.fetchDataValues(this.id);
+      if (!values){
+        this.#persisted = false;
+        throw new Error(`${Model.modelName} is no longer persisted`)
+      }
       this.setDataValues(values as any);
       return this;
     }
@@ -227,6 +231,17 @@ export function defineModel<Definition extends ModelDefinition>(
       });
 
       return row.id;
+    }
+    static async destroy(id: number | string): Promise<WithId> {
+      const rows = await query<WithId>({
+        text: `
+          DELETE FROM ${this.tableName}
+          WHERE ${this.tableName}.id = $1
+          RETURNING id
+          `,
+        args: [id],
+      });
+      return rows[0];
     }
   }
   return Model as
