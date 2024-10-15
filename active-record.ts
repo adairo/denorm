@@ -52,17 +52,23 @@ function assertPersisted(
   }
 }
 
-type WithId = { id: number };
+type WithId<T = any> = T & { id: number };
 
-type ModelConstructor<Model, Definition extends ModelDefinition> =
-  & Model
-  & Constructor<
-    TranslateDefinition<Definition>
-  >;
+type ModelStatic = {
+  tableName: string;
+  modelName: string;
+  modelDefinition: ModelDefinition;
+};
 
-type Constructor<T> = new (...args: any[]) => T;
+type Constructor<T, K extends any[] = any[]> = new (
+  ...any: K
+) => T;
 
-export function createModel<Definition extends ModelDefinition>(
+type AbstractConstructor<T, K extends any[] = any[]> = abstract new (
+  ...any: K
+) => T;
+
+export function defineModel<Definition extends ModelDefinition>(
   modelName: string,
   modelDefinition: Definition,
 ) {
@@ -71,6 +77,7 @@ export function createModel<Definition extends ModelDefinition>(
     static tableName: string = modelDefinition.tableName;
     static modelDefinition: Definition = modelDefinition;
     private dataValues: Record<string, any>;
+    public id: number | null = null;
 
     constructor() {
       const allColumns = ["id"].concat(
@@ -84,7 +91,7 @@ export function createModel<Definition extends ModelDefinition>(
           writable: true,
         });
         return object;
-      }, {});
+      }, Object.create(null));
 
       allColumns.forEach((
         columnKey,
@@ -112,10 +119,10 @@ export function createModel<Definition extends ModelDefinition>(
     }
 
     static create<ConcreteModel extends Model>(
-      this: Constructor<ConcreteModel>,
+      this: AbstractConstructor<ConcreteModel>,
       values: TranslateDefinition<Definition>,
     ): Promise<ConcreteModel> {
-      return Model.build(values).save() as any;
+      return (Model as any).build(values).save();
     }
 
     static async find<ConcreteModel extends Model>(
@@ -202,7 +209,10 @@ export function createModel<Definition extends ModelDefinition>(
       }).then(([row]) => row) as any;
     }
   }
-  return Model as ModelConstructor<typeof Model, Definition>;
+  return Model as
+    & typeof Model
+    & ModelStatic
+    & Constructor<TranslateDefinition<Definition>>;
 }
 
 type TypeMap = {
@@ -221,7 +231,7 @@ type TranslateDefinition<Definition extends ModelDefinition> = {
     : Definition["columns"][Col] extends { type: ColumnType }
       ? TypeMap[Definition["columns"][Col]["type"]]
     : "TIPO raro fuchi";
-};
+}
 
 type ModelDefinition = {
   tableName: string;
