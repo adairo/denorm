@@ -73,23 +73,32 @@ export function createModel<Definition extends ModelDefinition>(
     private dataValues: Record<string, any>;
 
     constructor() {
-      this.dataValues = Object.create(null);
+      const allColumns = ["id"].concat(
+        Object.keys(Model.modelDefinition.columns),
+      );
 
-      ["id"].concat(Object.keys(Model.modelDefinition.columns)).forEach((
+      this.dataValues = allColumns.reduce((object, key) => {
+        Object.defineProperty(object, key, {
+          value: null,
+          enumerable: true,
+          writable: true,
+        });
+        return object;
+      }, {});
+
+      allColumns.forEach((
         columnKey,
       ) =>
         Object.defineProperty(this, columnKey, {
           get() {
-            return this.dataValues[columnKey] ?? null;
+            return this.dataValues[columnKey];
           },
-          enumerable: true,
-          configurable: true,
         })
       );
     }
 
     protected setDataValues(dataValues: TranslateDefinition<Definition>) {
-      this.dataValues = { ...dataValues };
+      Object.assign(this.dataValues, dataValues);
       return this;
     }
 
@@ -98,7 +107,7 @@ export function createModel<Definition extends ModelDefinition>(
       values: TranslateDefinition<Definition>,
     ): ConcreteModel {
       return new this().setDataValues(
-        Object.assign({ id: null }, values),
+        values,
       ) as any;
     }
 
@@ -114,8 +123,8 @@ export function createModel<Definition extends ModelDefinition>(
       id: number,
     ): Promise<ConcreteModel & { id: number }> {
       const [row] = await Model.fetchDataValues(id);
-      if (row === null) {
-        throw new Error(`${Model.modelName} with id <${id}> not found`);
+      if (row === undefined) {
+        throw new Error(`${Model.modelName} with id (${id}) not found`);
       }
 
       return new this().setDataValues(row as any) as any;
