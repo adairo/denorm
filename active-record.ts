@@ -44,15 +44,16 @@ import client from "./db.ts";
 
 function assertPersisted(
   model: any,
-): asserts model is { id: number } {
-  if (!("id" in model)) {
+): asserts model is PersistedModel {
+  if (!("id" in model) || !model.persisted) {
     throw new Error(
       `This ${model.modelName} instance is not persisted yet, did you forget to call Model.save() first?`,
     );
   }
 }
 
-type WithId<T = any> = T & { id: number };
+type WithId = { id: number };
+type PersistedModel = { id: number; persisted: true };
 
 type ModelStatic = {
   tableName: string;
@@ -78,6 +79,11 @@ export function defineModel<Definition extends ModelDefinition>(
     static modelDefinition: Definition = modelDefinition;
     private dataValues: Record<string, any>;
     public id: number | null = null;
+    #persisted: boolean = false;
+
+    get persisted(): boolean {
+      return this.#persisted;
+    }
 
     constructor() {
       const allColumns = ["id"].concat(
@@ -119,22 +125,31 @@ export function defineModel<Definition extends ModelDefinition>(
     }
 
     static create<ConcreteModel extends Model>(
-      this: AbstractConstructor<ConcreteModel>,
+      this: Constructor<ConcreteModel>,
       values: TranslateDefinition<Definition>,
-    ): Promise<ConcreteModel> {
-      return (Model as any).build(values).save();
+    ) {
+      return Model.build(values).save();
     }
 
-    static async find<ConcreteModel extends Model>(
+    static find<ConcreteModel extends Model>(
       this: Constructor<ConcreteModel>,
       id: number,
-    ): Promise<ConcreteModel & { id: number }> {
-      const [row] = await Model.fetchDataValues(id);
-      if (row === undefined) {
+    ): Promise<ConcreteModel & PersistedModel> {
+      return new this().fetchAndSetDataValues(id);
+    }
+
+    private async fetchAndSetDataValues(
+      id: number,
+    ): Promise<this & PersistedModel> {
+      const [dataValues] = await Model.fetchDataValues(id);
+      if (dataValues === undefined) {
         throw new Error(`${Model.modelName} with id (${id}) not found`);
       }
 
-      return new this().setDataValues(row as any) as any;
+      this.setDataValues(dataValues as any);
+      this.#persisted = true;
+      assertPersisted(this);
+      return this;
     }
 
     protected static fetchDataValues(id: number) {
@@ -147,8 +162,7 @@ export function defineModel<Definition extends ModelDefinition>(
       });
     }
 
-    // Make return as Model & {id: number}
-    save(): Promise<this> {
+    async save(): Promise<this & PersistedModel> {
       const { id: _id, ...values } = this.dataValues;
       const entries = Object.entries(values);
       const columnNames = entries.map((entry) => entry.at(0));
@@ -157,7 +171,7 @@ export function defineModel<Definition extends ModelDefinition>(
         `$${index + 1}`
       );
 
-      return query({
+      const [row] = await query({
         text: `
           INSERT INTO ${Model.tableName}
             (${columnNames.join(",")})
@@ -165,30 +179,34 @@ export function defineModel<Definition extends ModelDefinition>(
           RETURNING id
         `,
         args: columnValues,
-      }).then(([row]) =>
-        Object.defineProperty(this.dataValues, "id", {
-          value: (row as any).id,
-          enumerable: true,
-        })
-      ).then(() => this);
+      });
+      this.#persisted = true;
+      Object.defineProperty(this.dataValues, "id", {
+        value: (row as any).id,
+        enumerable: true,
+      });
+      return this as any;
     }
 
-    reload() {
+    async reload(): Promise<this & PersistedModel> {
       assertPersisted(this);
-      return Model.fetchDataValues(this.id).then(([values]) =>
-        this.setDataValues(values as any)
-      ).then(() => this);
+      const [values] = await Model.fetchDataValues(this.id);
+      this.setDataValues(values as any);
+      return this;
     }
 
-    update(data: Partial<TranslateDefinition<Definition>>): Promise<WithId> {
+    async update(
+      data: Partial<TranslateDefinition<Definition>>,
+    ): Promise<this & PersistedModel> {
       assertPersisted(this);
-      return Model.update(this.id, data).then(() => this.reload());
+      await Model.update(this.id, data);
+      return await this.reload();
     }
 
-    static update(
+    static async update(
       id: number | string,
       data: Partial<TranslateDefinition<Definition>>,
-    ): Promise<WithId> {
+    ): Promise<number> {
       const set = (column: string, index: number) => `${column} = $${index}`;
       const argOffset = 2;
 
@@ -198,7 +216,7 @@ export function defineModel<Definition extends ModelDefinition>(
       ).join(",");
       const args = [id].concat(entries.map((entry) => entry.at(1) as string));
 
-      return query({
+      const [row] = await query<WithId>({
         text: `
           UPDATE ${this.tableName}
           SET ${updatedFields}
@@ -206,7 +224,9 @@ export function defineModel<Definition extends ModelDefinition>(
           RETURNING id
           `,
         args,
-      }).then(([row]) => row) as any;
+      });
+
+      return row.id;
     }
   }
   return Model as
@@ -231,7 +251,7 @@ type TranslateDefinition<Definition extends ModelDefinition> = {
     : Definition["columns"][Col] extends { type: ColumnType }
       ? TypeMap[Definition["columns"][Col]["type"]]
     : "TIPO raro fuchi";
-}
+};
 
 type ModelDefinition = {
   tableName: string;
@@ -241,7 +261,7 @@ type ModelDefinition = {
   >;
 };
 
-function query<T>(options: QueryObjectOptions) {
+function query<T>(options: QueryObjectOptions): Promise<T[]> {
   return client.queryObject<T>(options).then((result) => result.rows);
 }
 /* class ORM<TMap extends ModelMap = {}> {
