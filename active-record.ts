@@ -42,6 +42,35 @@ type AbstractConstructor<T, K extends any[] = any[]> = abstract new (
   ...any: K
 ) => T;
 
+type ModelDefinition = {
+  tableName: string;
+  columns: Record<
+    string,
+    ColumnType | { type: ColumnType; notNull?: boolean }
+  >;
+};
+
+type SelectQuery<Model extends ModelDefinition> = {
+  select: Partial<
+    Record<
+      keyof TranslateDefinition<Model>,
+      boolean
+    >
+  >;
+  where?: Partial<
+    Record<keyof TranslateDefinition<Model>, string>
+  >;
+  from: Pick<ModelStatic, "tableName">;
+  orderBy?: Array<
+    [
+      keyof TranslateDefinition<Model>,
+      "ASC" | "DESC",
+    ]
+  >;
+  limit?: number;
+  offset?: number;
+};
+
 export function defineModel<
   Definition extends ModelDefinition,
   ModelSchema = TranslateDefinition<Definition>,
@@ -59,6 +88,41 @@ export function defineModel<
 
     get persisted(): boolean {
       return this.#persisted;
+    }
+
+    static query<Model extends ModelDefinition>(
+      queryDefinition: Omit<SelectQuery<Definition>, "from">,
+    ) {
+      return query({
+        text: `
+          SELECT
+            ${Object.keys(queryDefinition.select).join(",")}
+          FROM
+            ${this.tableName}
+            ${
+          queryDefinition.where
+            ? `WHERE
+            ${
+              Object.entries(queryDefinition.where ?? {}).map(([col, value]) =>
+                `${col} = '${value}'`
+              )
+                .join(" AND ")
+            }`
+            : ""
+        }
+        ${
+          queryDefinition.orderBy
+            ? ` ORDER BY ${
+              queryDefinition.orderBy.map(([col, order]) =>
+                `${String(col)} ${order}`
+              ).join(", ")
+            }`
+            : ""
+        }
+          
+         ${queryDefinition.limit ? `LIMIT ${queryDefinition.limit}` : ""}
+        `,
+      });
     }
 
     constructor() {
@@ -264,14 +328,6 @@ type TranslateDefinition<Definition extends ModelDefinition> = {
     : Definition["columns"][Col] extends { type: ColumnType }
       ? TypeMap[Definition["columns"][Col]["type"]]
     : "TIPO raro fuchi";
-};
-
-type ModelDefinition = {
-  tableName: string;
-  columns: Record<
-    string,
-    ColumnType | { type: ColumnType; notNull?: boolean }
-  >;
 };
 
 function query<T>(options: QueryObjectOptions): Promise<T[]> {
