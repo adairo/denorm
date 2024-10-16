@@ -3,10 +3,11 @@ import type { QueryObjectOptions } from "https://deno.land/x/postgres@v0.19.3/mo
 import client from "./db.ts";
 
 function assertPersisted(
-  model: any,
-): asserts model is PersistedModel {
-  if (!("id" in model) || !model.persisted) {
-    const modelName = model.constructor.name;
+  instance: UnknownPersistedModel,
+  model: ModelStatic,
+): asserts instance is PersistedModel {
+  if (instance.id === null || !instance.persisted) {
+    const modelName = model.modelName;
     throw new Error(
       `This ${modelName} model instance is not persisted yet, did you call ${modelName}.save() first?`,
     );
@@ -35,11 +36,16 @@ type Constructor<T, K extends any[] = any[]> = new (
   ...any: K
 ) => T;
 
+type InstanceOf<T> = T extends new (...any: any[]) => infer T ? T : never;
+
 type AbstractConstructor<T, K extends any[] = any[]> = abstract new (
   ...any: K
 ) => T;
 
-export function defineModel<Definition extends ModelDefinition>(
+export function defineModel<
+  Definition extends ModelDefinition,
+  ModelSchema = TranslateDefinition<Definition>,
+>(
   modelName: string,
   modelDefinition: Definition,
 ) {
@@ -47,7 +53,7 @@ export function defineModel<Definition extends ModelDefinition>(
     static modelName: string = modelName;
     static tableName: string = modelDefinition.tableName;
     static modelDefinition: Definition = modelDefinition;
-    private dataValues: Record<string, any>;
+    private dataValues: ModelSchema;
     public id: number | null = null;
     #persisted: boolean = false;
 
@@ -80,25 +86,25 @@ export function defineModel<Definition extends ModelDefinition>(
       );
     }
 
-    private setDataValues(dataValues: TranslateDefinition<Definition>) {
-      Object.assign(this.dataValues, dataValues);
+    private setDataValues(dataValues: ModelSchema) {
+      this.dataValues = { ...this.dataValues, ...dataValues };
       return this;
     }
 
     static build<ConcreteModel extends Model>(
       this: Constructor<ConcreteModel>,
-      values: TranslateDefinition<Definition>,
+      values: ModelSchema,
     ): OmitPersistence<ConcreteModel> & NonPersistedModel {
       return new this().setDataValues(
         values,
       ) as any;
     }
 
-    static create<ConcreteModel extends Model>(
-      this: Constructor<ConcreteModel>,
-      values: TranslateDefinition<Definition>,
-    ): Promise<OmitPersistence<ConcreteModel> & PersistedModel> {
-      return Model.build(values).save() as any;
+    static create<ConcreteModel extends typeof Model>(
+      this: ConcreteModel,
+      values: ModelSchema,
+    ): Promise<OmitPersistence<InstanceOf<ConcreteModel>> & PersistedModel> {
+      return this.build(values).save() as any;
     }
 
     static find<ConcreteModel extends Model>(
@@ -106,6 +112,19 @@ export function defineModel<Definition extends ModelDefinition>(
       id: number,
     ): Promise<OmitPersistence<ConcreteModel> & PersistedModel> {
       return new this().fetchAndSetDataValues(id);
+    }
+
+    static all<ConcreteModel extends Model>(
+      this: Constructor<ConcreteModel>,
+    ): Promise<(OmitPersistence<ConcreteModel> & PersistedModel)[]> {
+      return query<ModelSchema>({
+        text: `
+          SELECT *
+          FROM ${Model.tableName}
+        `,
+      }).then((rows) =>
+        rows.map((row) => new this().setDataValues(row))
+      ) as any;
     }
 
     private async fetchAndSetDataValues(
@@ -118,7 +137,7 @@ export function defineModel<Definition extends ModelDefinition>(
 
       this.setDataValues(dataValues as any);
       this.#persisted = true;
-      assertPersisted(this);
+      assertPersisted(this, Model);
       return this;
     }
 
@@ -159,7 +178,7 @@ export function defineModel<Definition extends ModelDefinition>(
     }
 
     async reload(): Promise<OmitPersistence<this> & PersistedModel> {
-      assertPersisted(this);
+      assertPersisted(this, Model);
       const [values] = await Model.fetchDataValues(this.id);
       if (!values) {
         this.#persisted = false;
@@ -172,7 +191,7 @@ export function defineModel<Definition extends ModelDefinition>(
     async update(
       data: Partial<TranslateDefinition<Definition>>,
     ): Promise<OmitPersistence<this> & PersistedModel> {
-      assertPersisted(this);
+      assertPersisted(this, Model);
       await Model.update(this.id, data);
       return await this.reload();
     }
@@ -204,7 +223,7 @@ export function defineModel<Definition extends ModelDefinition>(
     }
 
     async destroy(): Promise<OmitPersistence<this> & NonPersistedModel> {
-      assertPersisted(this);
+      assertPersisted(this, Model);
       await Model.destroy(this.id);
       this.#persisted = false;
       this.setDataValues({ id: null } as any);
