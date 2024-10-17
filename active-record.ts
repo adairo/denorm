@@ -38,15 +38,16 @@ type Constructor<T, K extends any[] = any[]> = new (
 
 type InstanceOf<T> = T extends new (...any: any[]) => infer T ? T : never;
 
-type AbstractConstructor<T, K extends any[] = any[]> = abstract new (
-  ...any: K
-) => T;
-
 type ModelDefinition = {
   tableName: string;
   columns: Record<
     string,
-    ColumnType | { type: ColumnType; notNull?: boolean }
+    ColumnType | {
+      type: ColumnType;
+      notNull?: boolean;
+      primaryKey?: boolean;
+      references?: ModelStatic;
+    }
   >;
 };
 
@@ -65,13 +66,13 @@ type SelectQuery<Model extends Record<string, any>> = {
   offset?: number;
 };
 
-function select<
-  Model extends Record<string, any>,
+export function select<
+  Columns extends Record<string, any>,
 >(
-  columnsOrValues: Array<keyof Model>,
-  queryDefinition: SelectQuery<Model>,
+  columnsOrValues: Array<keyof Columns>,
+  queryDefinition: SelectQuery<Columns>,
 ) {
-  return client.queryObject<Partial<Model>>({
+  return client.queryObject<Partial<Columns>>({
     text: `
       SELECT
         ${columnsOrValues.join(",")}
@@ -182,11 +183,6 @@ export function defineModel<
       );
     }
 
-    private setDataValues(dataValues: ModelSchema) {
-      this.#dataValues = { ...this.#dataValues, ...dataValues };
-      return this;
-    }
-
     static build<ConcreteModel extends typeof Model>(
       this: ConcreteModel,
       values: Partial<ModelSchema>,
@@ -215,6 +211,9 @@ export function defineModel<
         this.modelDefinition.columns,
       ),
     ): Promise<OmitPersistence<InstanceOf<ConcreteModel>> & PersistedModel> {
+      if (id === null || typeof id === "undefined") {
+        throw new Error(`${id} is not a valid identifier`);
+      }
       return this.select(columnsOrValues, {
         where: { id } as unknown as ModelSchema,
       }).then((result) => {
@@ -223,26 +222,8 @@ export function defineModel<
           throw new Error("Not found");
         }
 
-        return modelInstance
+        return modelInstance;
       }) as any;
-    }
-
-    private async fetchAndSetDataValues(
-      id: number,
-    ): Promise<OmitPersistence<this> & PersistedModel> {
-      const [dataValues] = await Model.select(
-        Object.keys(Model.modelDefinition.columns),
-        // @ts-expect-error id must be part of some internals
-        { where: { id } },
-      );
-      if (dataValues === undefined) {
-        throw new Error(`${Model.modelName} with id (${id}) not found`);
-      }
-
-      this.setDataValues(dataValues as any);
-      this.#persisted = true;
-      assertPersisted(this, Model);
-      return this;
     }
 
     async save(): Promise<OmitPersistence<this> & PersistedModel> {
@@ -313,11 +294,11 @@ export function defineModel<
       return row.id;
     }
 
-    async destroy(): Promise<OmitPersistence<this> & NonPersistedModel> {
+    async destroy(): Promise<this> {
       assertPersisted(this, Model);
       await Model.destroy(this.id);
       this.#persisted = false;
-      this.setDataValues({ id: null } as any);
+      this.set({ id: null } as any);
       return this as any;
     }
 
@@ -336,12 +317,12 @@ export function defineModel<
   return Model as
     & typeof Model
     & ModelStatic
-    & Constructor<ModelSchema & NonPersistedModel>;
+    & Constructor<ModelSchema>;
 }
 
 type TypeMap = {
   "string": string;
-  "number": number;
+  "integer": number;
   "boolean": boolean;
   [dataType: `date${string | undefined}`]: Date;
   "timestamp": Date;
