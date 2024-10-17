@@ -6,7 +6,7 @@ function assertPersisted(
   instance: UnknownPersistedModel,
   model: ModelStatic,
 ): asserts instance is PersistedModel {
-  if (instance.id === null || !instance.persisted) {
+  if (instance.dataValues.id === null || !instance.persisted) {
     const modelName = model.modelName;
     throw new Error(
       `This ${modelName} model instance is not persisted yet, did you call ${modelName}.save() first?`,
@@ -15,13 +15,16 @@ function assertPersisted(
 }
 
 type WithId = { id: number };
-type UnknownPersistedModel = { id: number | null; persisted: boolean };
+type UnknownPersistedModel = {
+  dataValues: { id: number | null };
+  persisted: boolean;
+};
 type OmitPersistence<Model extends { id: any; persisted: any }> = Omit<
   Model,
   "id" | "persisted"
 >;
 type PersistedModel = {
-  id: number;
+  dataValues: { id: number };
   persisted: true;
 };
 type NonPersistedModel = { id: null; persisted: false };
@@ -42,13 +45,15 @@ type ModelDefinition = {
   tableName: string;
   columns: Record<
     string,
-    ColumnType | {
-      type: ColumnType;
-      notNull?: boolean;
-      primaryKey?: boolean;
-      references?: ModelStatic;
-    }
+    ColumnType | ColumnDefinition
   >;
+};
+
+type ColumnDefinition = {
+  type: ColumnType;
+  notNull?: boolean;
+  primaryKey?: boolean;
+  references?: ModelStatic;
 };
 
 type SelectQuery<Model extends Record<string, any>> = {
@@ -116,9 +121,7 @@ select<User>(["first_name"], {
 
 export function defineModel<
   Definition extends ModelDefinition,
-  ModelSchema extends Record<string, any> =
-    & TranslateDefinition<Definition>
-    & WithId,
+  ModelSchema extends Record<string, any> = TranslateDefinition<Definition>,
 >(
   modelName: string,
   modelDefinition: Definition,
@@ -128,8 +131,15 @@ export function defineModel<
     static tableName: string = modelDefinition.tableName;
     static modelDefinition: Definition = modelDefinition;
     #dataValues: ModelSchema;
-    public id: number | null = null;
+    #primaryKeyProperty: string | null = null;
     #persisted: boolean = false;
+
+    get primaryKey(): string | number | null {
+      if (this.#primaryKeyProperty === null) {
+        return null;
+      }
+      return this.dataValues[this.#primaryKeyProperty];
+    }
 
     get persisted(): boolean {
       return this.#persisted;
@@ -159,11 +169,15 @@ export function defineModel<
     }
 
     constructor() {
-      const allColumns = ["id"].concat(
-        Object.keys(Model.modelDefinition.columns),
-      );
+      const allColumns = Object.entries(Model.modelDefinition.columns);
 
-      this.#dataValues = allColumns.reduce((object, key) => {
+      this.#dataValues = allColumns.reduce((object, [key, value]) => {
+        if (
+          typeof value === "object" && "primaryKey" in value &&
+          value.primaryKey === true
+        ) {
+          this.#primaryKeyProperty = key;
+        }
         Object.defineProperty(object, key, {
           value: null,
           enumerable: true,
@@ -173,7 +187,7 @@ export function defineModel<
       }, Object.create(null));
 
       allColumns.forEach((
-        columnKey,
+        [columnKey],
       ) =>
         Object.defineProperty(this, columnKey, {
           get() {
@@ -186,7 +200,7 @@ export function defineModel<
     static build<ConcreteModel extends typeof Model>(
       this: ConcreteModel,
       values: Partial<ModelSchema>,
-    ): OmitPersistence<InstanceOf<ConcreteModel>> & NonPersistedModel {
+    ): InstanceOf<ConcreteModel> {
       return new this().set(
         values,
       ) as any;
@@ -200,22 +214,22 @@ export function defineModel<
     static create<ConcreteModel extends typeof Model>(
       this: ConcreteModel,
       values: ModelSchema,
-    ): Promise<OmitPersistence<InstanceOf<ConcreteModel>> & PersistedModel> {
+    ): Promise<InstanceOf<ConcreteModel>> {
       return this.build(values).save() as any;
     }
 
     static find<ConcreteModel extends typeof Model>(
       this: ConcreteModel,
-      id: number,
+      primaryKey: string | number,
       columnsOrValues: Array<keyof ModelSchema> = Object.keys(
         this.modelDefinition.columns,
       ),
-    ): Promise<OmitPersistence<InstanceOf<ConcreteModel>> & PersistedModel> {
-      if (id === null || typeof id === "undefined") {
-        throw new Error(`${id} is not a valid identifier`);
+    ): Promise<InstanceOf<ConcreteModel>> {
+      if (primaryKey === null || typeof primaryKey === "undefined") {
+        throw new Error(`${primaryKey} is not a valid identifier`);
       }
       return this.select(columnsOrValues, {
-        where: { id } as unknown as ModelSchema,
+        where: { primaryKey } as unknown as ModelSchema,
       }).then((result) => {
         const modelInstance = result[0];
         if (!modelInstance) {
@@ -226,7 +240,7 @@ export function defineModel<
       }) as any;
     }
 
-    async save(): Promise<OmitPersistence<this> & PersistedModel> {
+    async save(): Promise<this> {
       const { id: _id, ...values } = this.#dataValues;
       const entries = Object.entries(values);
       const columnNames = entries.map((entry) => entry.at(0));
@@ -253,18 +267,18 @@ export function defineModel<
       return this as any;
     }
 
-    async reload(): Promise<OmitPersistence<this> & PersistedModel> {
+    async reload(): Promise<this> {
       assertPersisted(this, Model);
-      const clone = await Model.find(this.id);
+      const clone = await Model.find(this.primaryKey!);
       this.set(clone.dataValues);
       return this;
     }
 
     async update(
       data: Partial<ModelSchema>,
-    ): Promise<OmitPersistence<this> & PersistedModel> {
+    ): Promise<this> {
       assertPersisted(this, Model);
-      await Model.update(this.id, data);
+      await Model.update(this.primaryKey!, data);
       return await this.reload();
     }
 
@@ -296,10 +310,14 @@ export function defineModel<
 
     async destroy(): Promise<this> {
       assertPersisted(this, Model);
-      await Model.destroy(this.id);
+      await Model.destroy(this.primaryKey!);
       this.#persisted = false;
       this.set({ id: null } as any);
       return this as any;
+    }
+
+    toJSON(){
+      return JSON.stringify(this.#dataValues)
     }
 
     static async destroy(id: number | string): Promise<WithId> {
@@ -334,13 +352,20 @@ type TranslateDefinition<
   Definition extends ModelDefinition,
   Columns = Definition["columns"],
 > = {
-  [Col in keyof Columns]: Columns[Col] extends
-    ColumnType ? TypeMap[Columns[Col]]
+  [Col in keyof Columns]: Columns[Col] extends ColumnType
+    ? GetOptionality<Columns[Col], TypeMap[Columns[Col]]>
     : Columns[Col] extends { type: ColumnType }
-      ? TypeMap[Columns[Col]["type"]]
+      ? GetOptionality<Columns[Col], TypeMap[Columns[Col]["type"]]>
     : "TIPO raro fuchi";
 };
 
+type GetOptionality<
+  Column extends ColumnDefinition | ColumnType,
+  Type,
+> = Column extends { notNull: true } | { primaryKey: true } ? Type
+  : Type | null;
+
+type Something = GetOptionality<"integer", string>;
 
 /* class ORM<TMap extends ModelMap = {}> {
   models: TMap = {} as TMap;
