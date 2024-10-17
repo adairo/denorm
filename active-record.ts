@@ -330,13 +330,18 @@ type TypeMap = {
 
 type ColumnType = keyof TypeMap;
 
-type TranslateDefinition<Definition extends ModelDefinition> = {
-  [Col in keyof Definition["columns"]]: Definition["columns"][Col] extends
-    ColumnType ? TypeMap[Definition["columns"][Col]]
-    : Definition["columns"][Col] extends { type: ColumnType }
-      ? TypeMap[Definition["columns"][Col]["type"]]
+type TranslateDefinition<
+  Definition extends ModelDefinition,
+  Columns = Definition["columns"],
+> = {
+  [Col in keyof Columns]: Columns[Col] extends
+    ColumnType ? TypeMap[Columns[Col]]
+    : Columns[Col] extends { type: ColumnType }
+      ? TypeMap[Columns[Col]["type"]]
     : "TIPO raro fuchi";
 };
+
+
 /* class ORM<TMap extends ModelMap = {}> {
   models: TMap = {} as TMap;
   defineModel<
