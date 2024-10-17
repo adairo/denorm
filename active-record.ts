@@ -50,20 +50,14 @@ type ModelDefinition = {
   >;
 };
 
-type SelectQuery<Model extends ModelDefinition> = {
-  select: Partial<
-    Record<
-      keyof TranslateDefinition<Model>,
-      boolean
-    >
-  >;
+type SelectQuery<Model extends Record<string, any>> = {
   where?: Partial<
-    Record<keyof TranslateDefinition<Model>, string>
+    Record<keyof Model, any>
   >;
-  from: Pick<ModelStatic, "tableName">;
+  from: string;
   orderBy?: Array<
     [
-      keyof TranslateDefinition<Model>,
+      keyof Model,
       "ASC" | "DESC",
     ]
   >;
@@ -71,9 +65,59 @@ type SelectQuery<Model extends ModelDefinition> = {
   offset?: number;
 };
 
+function select<
+  Model extends Record<string, any>,
+>(
+  columnsOrValues: Array<keyof Model>,
+  queryDefinition: SelectQuery<Model>,
+) {
+  return client.queryObject<Partial<Model>>({
+    text: `
+      SELECT
+        ${columnsOrValues.join(",")}
+      FROM
+        ${queryDefinition.from}
+        ${
+      queryDefinition.where
+        ? `WHERE
+        ${
+          Object.entries(queryDefinition.where ?? {}).map(([col, value]) =>
+            `${col} = '${value}'`
+          )
+            .join(" AND ")
+        }`
+        : ""
+    }
+    ${
+      queryDefinition.orderBy
+        ? ` ORDER BY ${
+          queryDefinition.orderBy.map(([col, order]) =>
+            `${String(col)} ${order}`
+          ).join(", ")
+        }`
+        : ""
+    }
+      
+     ${queryDefinition.limit ? `LIMIT ${queryDefinition.limit}` : ""}
+    `,
+  });
+}
+
+type User = { first_name: string; last_name: string };
+
+select<User>(["first_name"], {
+  from: "users",
+  where: {
+    first_name: "12",
+  },
+  orderBy: [["first_name", "ASC"]],
+});
+
 export function defineModel<
   Definition extends ModelDefinition,
-  ModelSchema = TranslateDefinition<Definition>,
+  ModelSchema extends Record<string, any> =
+    & TranslateDefinition<Definition>
+    & WithId,
 >(
   modelName: string,
   modelDefinition: Definition,
@@ -82,7 +126,7 @@ export function defineModel<
     static modelName: string = modelName;
     static tableName: string = modelDefinition.tableName;
     static modelDefinition: Definition = modelDefinition;
-    private dataValues: ModelSchema;
+    #dataValues: ModelSchema;
     public id: number | null = null;
     #persisted: boolean = false;
 
@@ -90,39 +134,27 @@ export function defineModel<
       return this.#persisted;
     }
 
-    static query<Model extends ModelDefinition>(
-      queryDefinition: Omit<SelectQuery<Definition>, "from">,
-    ) {
-      return query({
-        text: `
-          SELECT
-            ${Object.keys(queryDefinition.select).join(",")}
-          FROM
-            ${this.tableName}
-            ${
-          queryDefinition.where
-            ? `WHERE
-            ${
-              Object.entries(queryDefinition.where ?? {}).map(([col, value]) =>
-                `${col} = '${value}'`
-              )
-                .join(" AND ")
-            }`
-            : ""
-        }
-        ${
-          queryDefinition.orderBy
-            ? ` ORDER BY ${
-              queryDefinition.orderBy.map(([col, order]) =>
-                `${String(col)} ${order}`
-              ).join(", ")
-            }`
-            : ""
-        }
-          
-         ${queryDefinition.limit ? `LIMIT ${queryDefinition.limit}` : ""}
-        `,
+    get dataValues() {
+      return this.#dataValues;
+    }
+
+    static async select<ConcreteModel extends typeof Model>(
+      this: ConcreteModel,
+      columnsOrValues: Array<keyof ModelSchema>,
+      queryOptions: Omit<SelectQuery<ModelSchema>, "from">,
+    ): Promise<Array<InstanceOf<ConcreteModel>>> {
+      const result = await select<ModelSchema>(columnsOrValues, {
+        ...queryOptions,
+        from: this.tableName,
       });
+      return result.rows.map((row) =>
+        new this().set(row).setPersisted(true)
+      ) as any;
+    }
+
+    private setPersisted(persisted: boolean) {
+      this.#persisted = persisted;
+      return this;
     }
 
     constructor() {
@@ -130,7 +162,7 @@ export function defineModel<
         Object.keys(Model.modelDefinition.columns),
       );
 
-      this.dataValues = allColumns.reduce((object, key) => {
+      this.#dataValues = allColumns.reduce((object, key) => {
         Object.defineProperty(object, key, {
           value: null,
           enumerable: true,
@@ -151,17 +183,22 @@ export function defineModel<
     }
 
     private setDataValues(dataValues: ModelSchema) {
-      this.dataValues = { ...this.dataValues, ...dataValues };
+      this.#dataValues = { ...this.#dataValues, ...dataValues };
       return this;
     }
 
-    static build<ConcreteModel extends Model>(
-      this: Constructor<ConcreteModel>,
-      values: ModelSchema,
-    ): OmitPersistence<ConcreteModel> & NonPersistedModel {
-      return new this().setDataValues(
+    static build<ConcreteModel extends typeof Model>(
+      this: ConcreteModel,
+      values: Partial<ModelSchema>,
+    ): OmitPersistence<InstanceOf<ConcreteModel>> & NonPersistedModel {
+      return new this().set(
         values,
       ) as any;
+    }
+
+    public set(dataValues: Partial<ModelSchema>) {
+      this.#dataValues = { ...this.#dataValues, ...dataValues };
+      return this;
     }
 
     static create<ConcreteModel extends typeof Model>(
@@ -171,30 +208,33 @@ export function defineModel<
       return this.build(values).save() as any;
     }
 
-    static find<ConcreteModel extends Model>(
-      this: Constructor<ConcreteModel>,
+    static find<ConcreteModel extends typeof Model>(
+      this: ConcreteModel,
       id: number,
-    ): Promise<OmitPersistence<ConcreteModel> & PersistedModel> {
-      return new this().fetchAndSetDataValues(id);
-    }
+      columnsOrValues: Array<keyof ModelSchema> = Object.keys(
+        this.modelDefinition.columns,
+      ),
+    ): Promise<OmitPersistence<InstanceOf<ConcreteModel>> & PersistedModel> {
+      return this.select(columnsOrValues, {
+        where: { id } as unknown as ModelSchema,
+      }).then((result) => {
+        const modelInstance = result[0];
+        if (!modelInstance) {
+          throw new Error("Not found");
+        }
 
-    static all<ConcreteModel extends Model>(
-      this: Constructor<ConcreteModel>,
-    ): Promise<(OmitPersistence<ConcreteModel> & PersistedModel)[]> {
-      return query<ModelSchema>({
-        text: `
-          SELECT *
-          FROM ${Model.tableName}
-        `,
-      }).then((rows) =>
-        rows.map((row) => new this().setDataValues(row))
-      ) as any;
+        return modelInstance
+      }) as any;
     }
 
     private async fetchAndSetDataValues(
       id: number,
     ): Promise<OmitPersistence<this> & PersistedModel> {
-      const [dataValues] = await Model.fetchDataValues(id);
+      const [dataValues] = await Model.select(
+        Object.keys(Model.modelDefinition.columns),
+        // @ts-expect-error id must be part of some internals
+        { where: { id } },
+      );
       if (dataValues === undefined) {
         throw new Error(`${Model.modelName} with id (${id}) not found`);
       }
@@ -205,18 +245,8 @@ export function defineModel<
       return this;
     }
 
-    private static fetchDataValues(id: number) {
-      return query({
-        text: `
-          SELECT *
-          FROM ${Model.tableName}
-          WHERE ${Model.tableName}.id = $1`,
-        args: [id],
-      });
-    }
-
     async save(): Promise<OmitPersistence<this> & PersistedModel> {
-      const { id: _id, ...values } = this.dataValues;
+      const { id: _id, ...values } = this.#dataValues;
       const entries = Object.entries(values);
       const columnNames = entries.map((entry) => entry.at(0));
       const columnValues = entries.map((entry) => entry.at(1));
@@ -224,7 +254,7 @@ export function defineModel<
         `$${index + 1}`
       );
 
-      const [row] = await query({
+      const [row] = await client.queryObject<WithId>({
         text: `
           INSERT INTO ${Model.tableName}
             (${columnNames.join(",")})
@@ -232,10 +262,11 @@ export function defineModel<
           RETURNING id
         `,
         args: columnValues,
-      });
+      }).then((result) => result.rows);
+
       this.#persisted = true;
-      Object.defineProperty(this.dataValues, "id", {
-        value: (row as any).id,
+      Object.defineProperty(this.#dataValues, "id", {
+        value: row.id,
         enumerable: true,
       });
       return this as any;
@@ -243,17 +274,13 @@ export function defineModel<
 
     async reload(): Promise<OmitPersistence<this> & PersistedModel> {
       assertPersisted(this, Model);
-      const [values] = await Model.fetchDataValues(this.id);
-      if (!values) {
-        this.#persisted = false;
-        throw new Error(`${Model.modelName} is no longer persisted`);
-      }
-      this.setDataValues(values as any);
+      const clone = await Model.find(this.id);
+      this.set(clone.dataValues);
       return this;
     }
 
     async update(
-      data: Partial<TranslateDefinition<Definition>>,
+      data: Partial<ModelSchema>,
     ): Promise<OmitPersistence<this> & PersistedModel> {
       assertPersisted(this, Model);
       await Model.update(this.id, data);
@@ -262,7 +289,7 @@ export function defineModel<
 
     static async update(
       id: number | string,
-      data: Partial<TranslateDefinition<Definition>>,
+      data: Partial<ModelSchema>,
     ): Promise<number> {
       const set = (column: string, index: number) => `${column} = $${index}`;
       const argOffset = 2;
@@ -273,7 +300,7 @@ export function defineModel<
       ).join(",");
       const args = [id].concat(entries.map((entry) => entry.at(1) as string));
 
-      const [row] = await query<WithId>({
+      const [row] = await client.queryObject<WithId>({
         text: `
           UPDATE ${this.tableName}
           SET ${updatedFields}
@@ -281,7 +308,7 @@ export function defineModel<
           RETURNING id
           `,
         args,
-      });
+      }).then((result) => result.rows);
 
       return row.id;
     }
@@ -295,21 +322,21 @@ export function defineModel<
     }
 
     static async destroy(id: number | string): Promise<WithId> {
-      const rows = await query<WithId>({
+      const rows = await client.queryObject<WithId>({
         text: `
           DELETE FROM ${this.tableName}
           WHERE ${this.tableName}.id = $1
           RETURNING id
           `,
         args: [id],
-      });
+      }).then((result) => result.rows);
       return rows[0];
     }
   }
   return Model as
     & typeof Model
     & ModelStatic
-    & Constructor<TranslateDefinition<Definition> & NonPersistedModel>;
+    & Constructor<ModelSchema & NonPersistedModel>;
 }
 
 type TypeMap = {
@@ -329,10 +356,6 @@ type TranslateDefinition<Definition extends ModelDefinition> = {
       ? TypeMap[Definition["columns"][Col]["type"]]
     : "TIPO raro fuchi";
 };
-
-function query<T>(options: QueryObjectOptions): Promise<T[]> {
-  return client.queryObject<T>(options).then((result) => result.rows);
-}
 /* class ORM<TMap extends ModelMap = {}> {
   models: TMap = {} as TMap;
   defineModel<
