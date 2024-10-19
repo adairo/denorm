@@ -3,28 +3,27 @@ import type { QueryObjectOptions } from "https://deno.land/x/postgres@v0.19.3/mo
 import client from "./db.ts";
 
 function assertPersisted(
-  instance: UnknownPersistedModel,
+  instance: any,
   model: ModelStatic,
-): asserts instance is PersistedModel {
-  if (instance.dataValues.id === null || !instance.persisted) {
-    const modelName = model.modelName;
+): void {
+  if (instance.primaryKey === null || !instance.persisted) {
     throw new Error(
-      `This ${modelName} model instance is not persisted yet, did you call ${modelName}.save() first?`,
+      `This ${model.modelName} model instance is not persisted yet, did you call ${model.modelName}.save() first?`,
     );
   }
 }
 
 type WithId = { id: number };
 type UnknownPersistedModel = {
-  dataValues: { id: number | null };
+  primaryKey: string | number | null;
   persisted: boolean;
 };
-type OmitPersistence<Model extends { id: any; persisted: any }> = Omit<
+type OmitPersistence<Model extends { primaryKey: any; persisted: any }> = Omit<
   Model,
   "id" | "persisted"
 >;
 type PersistedModel = {
-  dataValues: { id: number };
+  primaryKey: string | number;
   persisted: true;
 };
 type NonPersistedModel = { id: null; persisted: false };
@@ -119,9 +118,25 @@ select<User>(["first_name"], {
   orderBy: [["first_name", "ASC"]],
 });
 
+type GetPrimaryKey<Columns extends ModelDefinition["columns"]> = {
+  [
+    Key in keyof Columns as Columns[Key] extends ColumnDefinition
+      ? Columns[Key]["primaryKey"] extends true ? Key : never
+      : never
+  ]: Columns[Key] extends ColumnDefinition ? TypeMap[Columns[Key]["type"]]
+    : never;
+};
+
+type PrimaryKey<Columns extends ModelDefinition["columns"]> = GetPrimaryKey<
+  Columns
+> extends { [key: PropertyKey]: infer T } ? T : never;
+
+type a = PrimaryKey<{ uuid: { type: "string"; primaryKey: true } }>;
+
 export function defineModel<
   Definition extends ModelDefinition,
   ModelSchema extends Record<string, any> = TranslateDefinition<Definition>,
+  Pk = PrimaryKey<Definition["columns"]>,
 >(
   modelName: string,
   modelDefinition: Definition,
@@ -134,7 +149,7 @@ export function defineModel<
     #primaryKeyProperty: string | null = null;
     #persisted: boolean = false;
 
-    get primaryKey(): string | number | null {
+    get primaryKey(): Pk | null {
       if (this.#primaryKeyProperty === null) {
         return null;
       }
@@ -220,7 +235,7 @@ export function defineModel<
 
     static find<ConcreteModel extends typeof Model>(
       this: ConcreteModel,
-      primaryKey: string | number,
+      primaryKey: Pk,
       columnsOrValues: Array<keyof ModelSchema> = Object.keys(
         this.modelDefinition.columns,
       ),
@@ -283,7 +298,7 @@ export function defineModel<
     }
 
     static async update(
-      id: number | string,
+      id: Pk,
       data: Partial<ModelSchema>,
     ): Promise<number> {
       const set = (column: string, index: number) => `${column} = $${index}`;
@@ -293,7 +308,7 @@ export function defineModel<
       const updatedFields = entries.map((entry) => entry.at(0) as string).map(
         (column, index) => set(column, index + argOffset), // start at 2
       ).join(",");
-      const args = [id].concat(entries.map((entry) => entry.at(1) as string));
+      const args = [id].concat(entries.map((entry) => entry.at(1)));
 
       const [row] = await client.queryObject<WithId>({
         text: `
@@ -316,11 +331,11 @@ export function defineModel<
       return this as any;
     }
 
-    toJSON(){
-      return JSON.stringify(this.#dataValues)
+    toJSON() {
+      return JSON.stringify(this.#dataValues);
     }
 
-    static async destroy(id: number | string): Promise<WithId> {
+    static async destroy(id: Pk): Promise<WithId> {
       const rows = await client.queryObject<WithId>({
         text: `
           DELETE FROM ${this.tableName}
