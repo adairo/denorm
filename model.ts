@@ -1,6 +1,8 @@
 // deno-lint-ignore-file no-explicit-any
-import type { QueryObjectOptions } from "https://deno.land/x/postgres@v0.19.3/mod.ts";
-import client from "./db.ts";
+
+import { Client } from "https://deno.land/x/postgres@v0.19.3/mod.ts";
+
+let client: Client | undefined;
 
 function assertPersisted(
   instance: any,
@@ -76,7 +78,7 @@ export function select<
   columnsOrValues: Array<keyof Columns>,
   queryDefinition: SelectQuery<Columns>,
 ) {
-  return client.queryObject<Partial<Columns>>({
+  return client!.queryObject<Partial<Columns>>({
     text: `
       SELECT
         ${columnsOrValues.join(",")}
@@ -108,16 +110,6 @@ export function select<
   });
 }
 
-type User = { first_name: string; last_name: string };
-
-select<User>(["first_name"], {
-  from: "users",
-  where: {
-    first_name: "12",
-  },
-  orderBy: [["first_name", "ASC"]],
-});
-
 type GetPrimaryKey<Columns extends ModelDefinition["columns"]> = {
   [
     Key in keyof Columns as Columns[Key] extends ColumnDefinition
@@ -140,7 +132,9 @@ export function defineModel<
 >(
   modelName: string,
   modelDefinition: Definition,
+  _client?: Client,
 ) {
+  client = _client;
   class Model {
     static modelName: string = modelName;
     static tableName: string = modelDefinition.tableName;
@@ -154,6 +148,10 @@ export function defineModel<
         return null;
       }
       return this.dataValues[this.#primaryKeyProperty];
+    }
+
+    get primaryKeyProperty(): string | null {
+      return this.#primaryKeyProperty;
     }
 
     get persisted(): boolean {
@@ -208,6 +206,7 @@ export function defineModel<
           get() {
             return this.dataValues[columnKey];
           },
+          enumerable: true,
         })
       );
     }
@@ -264,7 +263,7 @@ export function defineModel<
         `$${index + 1}`
       );
 
-      const [row] = await client.queryObject<WithId>({
+      const [row] = await client!.queryObject<WithId>({
         text: `
           INSERT INTO ${Model.tableName}
             (${columnNames.join(",")})
@@ -310,7 +309,7 @@ export function defineModel<
       ).join(",");
       const args = [id].concat(entries.map((entry) => entry.at(1)));
 
-      const [row] = await client.queryObject<WithId>({
+      const [row] = await client!.queryObject<WithId>({
         text: `
           UPDATE ${this.tableName}
           SET ${updatedFields}
@@ -336,7 +335,7 @@ export function defineModel<
     }
 
     static async destroy(id: Pk): Promise<WithId> {
-      const rows = await client.queryObject<WithId>({
+      const rows = await client!.queryObject<WithId>({
         text: `
           DELETE FROM ${this.tableName}
           WHERE ${this.tableName}.id = $1
@@ -355,6 +354,7 @@ export function defineModel<
 
 type TypeMap = {
   "string": string;
+  "uuid": string;
   "integer": number;
   "boolean": boolean;
   [dataType: `date${string | undefined}`]: Date;
@@ -371,7 +371,7 @@ type TranslateDefinition<
     ? GetOptionality<Columns[Col], TypeMap[Columns[Col]]>
     : Columns[Col] extends { type: ColumnType }
       ? GetOptionality<Columns[Col], TypeMap[Columns[Col]["type"]]>
-    : "TIPO raro fuchi";
+    : "Unsupported data type";
 };
 
 type GetOptionality<
