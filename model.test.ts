@@ -107,8 +107,9 @@ describe("Unextended Model class", () => {
   });
 
   describe("instance methods", () => {
-    const userData = { first_name: "Foo", last_name: "Bar", id: 1 };
+    const userData = { first_name: "Foo", last_name: "Bar" };
     let userInstance = User.build({});
+
     beforeEach(() => {
       userInstance = User.build(userData);
     });
@@ -123,10 +124,31 @@ describe("Unextended Model class", () => {
     });
 
     describe("save method", () => {
-      it.skip("when saving the primaryKey is saved", async () => {
+      it("the primaryKey is saved", async () => {
         expect(userInstance.primaryKey).toBeNull();
         await userInstance.save();
         expect(userInstance).not.toBeNull();
+      });
+
+      it("makes the object persisted", async () => {
+        expect(userInstance.persisted).toBeFalsy();
+        await userInstance.save();
+        expect(userInstance).toBeTruthy();
+      });
+
+      it("can be retrived from db", async () => {
+        await userInstance.save();
+        const { rows: [result] } = await db.queryObject<
+          { rowFound: true } | null
+        >(
+          `
+          SELECT true "rowFound"
+          FROM users
+          WHERE id = $1
+        `,
+          [userInstance.id],
+        );
+        expect(result?.rowFound).toBeTruthy();
       });
     });
   });
