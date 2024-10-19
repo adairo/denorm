@@ -29,15 +29,31 @@ describe({
   });
 });
 
-describe("Unextended Model class", function () {
+describe("Unextended Model class", () => {
   let db: Client;
 
   beforeAll(async () => {
     db = new Client();
+
     await db.connect();
+    await db.queryObject(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        first_name TEXT,
+        last_name TEXT
+      )`);
+  });
+
+  beforeEach(async () => {
+    await db.queryObject(`
+      TRUNCATE users
+    `);
   });
 
   afterAll(async () => {
+    await db.queryObject(`
+      DROP TABLE users
+    `);
     await db.end();
   });
 
@@ -45,8 +61,8 @@ describe("Unextended Model class", function () {
     tableName: "users",
     columns: {
       id: { type: "integer", primaryKey: true },
-      firstName: "string",
-      lastName: "string",
+      first_name: "string",
+      last_name: "string",
     },
   } as const;
 
@@ -59,13 +75,13 @@ describe("Unextended Model class", function () {
   describe("static methods", () => {
     describe("build", () => {
       it("stores the dataValues", () => {
-        const userData = { firstName: "Foo", lastName: "Bar", id: 1 };
+        const userData = { first_name: "Foo", last_name: "Bar", id: 1 };
         const user = User.build(userData);
         expect(user.dataValues).toEqual(userData);
       });
 
       it("creates property accesors for dataValues", () => {
-        const userData = { firstName: "Foo", lastName: "Bar", id: 1 };
+        const userData = { first_name: "Foo", last_name: "Bar", id: 1 };
         const user = User.build(userData);
         expect(user).toEqual(userData);
       });
@@ -84,14 +100,14 @@ describe("Unextended Model class", function () {
       });
 
       it("creates a non persisted instance", () => {
-        const user = User.build({ firstName: "Foo" });
+        const user = User.build({ first_name: "Foo" });
         expect(user.persisted).toBe(false);
       });
     });
   });
 
   describe("instance methods", () => {
-    const userData = { firstName: "Foo", lastName: "Bar", id: 1 };
+    const userData = { first_name: "Foo", last_name: "Bar", id: 1 };
     let userInstance = User.build({});
     beforeEach(() => {
       userInstance = User.build(userData);
@@ -99,19 +115,19 @@ describe("Unextended Model class", function () {
 
     describe("set method", () => {
       it("stores multiple values passed", () => {
-        const updatedData = { firstName: "Changed", id: 10 };
+        const updatedData = { first_name: "Changed", id: 10 };
         userInstance.set(updatedData);
-        const { firstName, id } = userInstance;
-        expect({ firstName, id }).toEqual(updatedData);
+        const { first_name, id } = userInstance;
+        expect({ first_name, id }).toEqual(updatedData);
       });
     });
 
     describe("save method", () => {
-      /* it.skip("when saving the primaryKey is saved", async () => {
+      it.skip("when saving the primaryKey is saved", async () => {
         expect(userInstance.primaryKey).toBeNull();
         await userInstance.save();
         expect(userInstance).not.toBeNull();
-      }); */
+      });
     });
   });
 });
