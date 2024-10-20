@@ -145,12 +145,22 @@ describe("Unextended Model class", () => {
       });
 
       it("Throws if passed nullish param", () => {
-        expect(User.find(null as any)).rejects.toThrow();
+        expect(User.find(null as any)).rejects.toThrow('is not a valid identifier');
         expect(User.find(undefined as any)).rejects.toThrow();
       });
 
       it("Throws if it doesnt find a row with that Pk", () => {
-        expect(User.find(-1)).rejects.toThrow();
+        expect(User.find(-1)).rejects.toThrow('User with id=-1 does not exist');
+      });
+
+      it("Throws if the model does not define a PK", () => {
+        const ModelWithoutPk = defineModel("_", {
+          columns: { foo: "integer" },
+          tableName: "_",
+        });
+        expect(ModelWithoutPk.find(1 /** valid pk */)).rejects.toThrow(
+          "model doesn't have a known primary key",
+        );
       });
     });
   });
