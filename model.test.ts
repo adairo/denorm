@@ -5,10 +5,10 @@ import {
   describe,
   it,
 } from "jsr:@std/testing/bdd";
-import { spy } from "jsr:@std/testing/mock";
 import { defineModel } from "./model.ts";
 import { expect } from "jsr:@std/expect";
 import { Client } from "https://deno.land/x/postgres@v0.19.3/mod.ts";
+
 
 describe({
   name: "defineModel function",
@@ -112,8 +112,21 @@ describe("Unextended Model class", () => {
           first_name: "Foo",
           last_name: "Bar",
         });
-        expect(user.persisted).toBeTruthy()
-        expect(user.primaryKey).toBeDefined()
+        expect(user.persisted).toBeTruthy();
+        expect(user.primaryKey).toBeDefined();
+      });
+    });
+
+    describe("find()", () => {
+      let user = new User();
+
+      beforeEach(async () => {
+        user = await User.create({ first_name: "Find", last_name: "Method" });
+      });
+
+      it("Returns an instance of the model", async () => {
+        user = await User.findByPk(user.id);
+        expect(user).toBeInstanceOf(User)
       });
     });
   });

@@ -15,6 +15,29 @@ function assertPersisted(
   }
 }
 
+function getPrimaryKeyColumn(model: ModelStatic): string {
+  const primaryKey = Object.keys(model.modelDefinition.columns).find(
+    (column) => {
+      const definition = model.modelDefinition.columns[column];
+
+      if (
+        typeof definition === "object" && "primaryKey" in definition &&
+        (definition.primaryKey) === true
+      ) {
+        return true;
+      }
+    },
+  )
+
+  if (!primaryKey) {
+    throw new Error(
+      `${model.modelName} model doesn't have a known primary key`,
+    );
+  }
+
+  return primaryKey;
+}
+
 type WithId = { id: number };
 type UnknownPersistedModel = {
   primaryKey: string | number | null;
@@ -44,11 +67,13 @@ type InstanceOf<T> = T extends new (...any: any[]) => infer T ? T : never;
 
 type ModelDefinition = {
   tableName: string;
-  columns: Record<
-    string,
-    ColumnType | ColumnDefinition
-  >;
+  columns: ModelColumns;
 };
+
+type ModelColumns = Record<
+  string,
+  ColumnType | ColumnDefinition
+>;
 
 type ColumnDefinition = {
   type: ColumnType;
@@ -245,7 +270,7 @@ export function defineModel<
       return this.build(values).save();
     }
 
-    static async find<ConcreteModel extends typeof Model>(
+    static async findByPk<ConcreteModel extends typeof Model>(
       this: ConcreteModel,
       primaryKey: Pk,
       columnsOrValues: Array<keyof ModelSchema> = Object.keys(
@@ -256,7 +281,9 @@ export function defineModel<
         throw new Error(`${primaryKey} is not a valid identifier`);
       }
       const result = await this.select(columnsOrValues, {
-        where: { primaryKey } as unknown as ModelSchema,
+        where: {
+          [getPrimaryKeyColumn(this)]: primaryKey,
+        } as unknown as ModelSchema,
       });
       const modelInstance = result[0];
       if (!modelInstance) {
@@ -334,7 +361,7 @@ export function defineModel<
 
     async reload(): Promise<this> {
       assertPersisted(this, Model);
-      const clone = await Model.find(this.primaryKey!);
+      const clone = await Model.findByPk(this.primaryKey!);
       this.set(clone.dataValues);
       return this;
     }
