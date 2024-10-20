@@ -15,10 +15,10 @@ function assertPersisted(
   }
 }
 
-function getPrimaryKeyColumn(model: ModelStatic): string {
-  const primaryKey = Object.keys(model.modelDefinition.columns).find(
+function getPrimaryKeyColumn(columns: ModelColumns): string | null {
+  const primaryKey = Object.keys(columns).find(
     (column) => {
-      const definition = model.modelDefinition.columns[column];
+      const definition = columns[column];
 
       if (
         typeof definition === "object" && "primaryKey" in definition &&
@@ -27,12 +27,10 @@ function getPrimaryKeyColumn(model: ModelStatic): string {
         return true;
       }
     },
-  )
+  );
 
   if (!primaryKey) {
-    throw new Error(
-      `${model.modelName} model doesn't have a known primary key`,
-    );
+    return null;
   }
 
   return primaryKey;
@@ -62,8 +60,6 @@ type ModelStatic = {
 type Constructor<T, K extends any[] = any[]> = new (
   ...any: K
 ) => T;
-
-type InstanceOf<T> = T extends new (...any: any[]) => infer T ? T : never;
 
 type ModelDefinition = {
   tableName: string;
@@ -144,18 +140,14 @@ type GetPrimaryKey<Columns extends ModelDefinition["columns"]> = {
     : never;
 };
 
-type Optional<T extends Record<PropertyKey, any>> = {
-  [K in keyof T]?: T[K];
-};
-
-type Values<Object extends Record<any, any>> = Object extends
+type ValuesOf<Object extends Record<any, any>> = Object extends
   { [key: PropertyKey]: infer T } ? T : never;
 
 export function defineModel<
   Definition extends ModelDefinition,
-  ModelSchema extends Record<string, any> = TranslateDefinition<Definition>,
+  Schema extends Record<string, any> = ModelSchema<Definition>,
   PrimaryKey extends Record<any, any> = GetPrimaryKey<Definition["columns"]>,
-  Pk = Values<PrimaryKey>,
+  Pk = ValuesOf<PrimaryKey>,
 >(
   modelName: string,
   modelDefinition: Definition,
@@ -166,7 +158,7 @@ export function defineModel<
     static modelName: string = modelName;
     static tableName: string = modelDefinition.tableName;
     static modelDefinition: Definition = modelDefinition;
-    #dataValues: ModelSchema;
+    #dataValues: Schema;
     #primaryKeyProperty: string | null = null;
     #persisted: boolean = false;
 
@@ -199,7 +191,7 @@ export function defineModel<
       return this.#dataValues;
     }
 
-    public set(dataValues: Partial<ModelSchema>) {
+    public set(dataValues: Partial<Schema>) {
       this.#dataValues = { ...this.#dataValues, ...dataValues };
       return this;
     }
@@ -209,6 +201,7 @@ export function defineModel<
     constructor() {
       const allColumns = Object.entries(Model.modelDefinition.columns);
 
+      this.#primaryKeyProperty = getPrimaryKeyColumn(modelDefinition.columns);
       this.#dataValues = allColumns.reduce((object, [key, value]) => {
         if (
           typeof value === "object" && "primaryKey" in value &&
@@ -238,24 +231,24 @@ export function defineModel<
 
     static async select<ConcreteModel extends typeof Model>(
       this: ConcreteModel,
-      columnsOrValues: Array<keyof ModelSchema>,
-      queryOptions: Omit<SelectQuery<ModelSchema>, "from">,
-    ): Promise<Array<InstanceOf<ConcreteModel>>> {
-      const result = await select<ModelSchema>(columnsOrValues, {
+      columnsOrValues: Array<keyof Schema>,
+      queryOptions: Omit<SelectQuery<Schema>, "from">,
+    ): Promise<Array<InstanceType<ConcreteModel>>> {
+      const result = await select<Schema>(columnsOrValues, {
         ...queryOptions,
         from: this.tableName,
       });
       return result.rows.map((row) => {
         const instance = new this().set(row);
         instance.persisted = true;
-        return instance as InstanceOf<ConcreteModel>;
+        return instance as InstanceType<ConcreteModel>;
       });
     }
 
     static build<ConcreteModel extends typeof Model>(
       this: ConcreteModel,
-      values: Partial<ModelSchema>,
-    ): InstanceOf<ConcreteModel> {
+      values: Partial<Schema>,
+    ): InstanceType<ConcreteModel> {
       return new this().set(
         values,
       ) as any;
@@ -264,37 +257,48 @@ export function defineModel<
     static create<ConcreteModel extends typeof Model>(
       this: ConcreteModel,
       values:
-        & Omit<ModelSchema, keyof PrimaryKey>
-        & Optional<PrimaryKey>,
-    ): Promise<InstanceOf<ConcreteModel>> {
+        & Omit<Schema, keyof PrimaryKey>
+        & Partial<PrimaryKey>,
+    ): Promise<InstanceType<ConcreteModel>> {
       return this.build(values).save();
     }
 
-    static async findByPk<ConcreteModel extends typeof Model>(
+    static async find<ConcreteModel extends typeof Model>(
       this: ConcreteModel,
       primaryKey: Pk,
-      columnsOrValues: Array<keyof ModelSchema> = Object.keys(
+      columnsOrValues: Array<keyof Schema> = Object.keys(
         this.modelDefinition.columns,
       ),
-    ): Promise<InstanceOf<ConcreteModel>> {
+    ): Promise<InstanceType<ConcreteModel>> {
       if (primaryKey === null || typeof primaryKey === "undefined") {
         throw new Error(`${primaryKey} is not a valid identifier`);
       }
+      const primaryKeyColumn = getPrimaryKeyColumn(
+        this.modelDefinition.columns,
+      );
+      if (!primaryKeyColumn) {
+        throw new Error(
+          `${this.modelName} model doesn't have a known primary key`,
+        );
+      }
       const result = await this.select(columnsOrValues, {
         where: {
-          [getPrimaryKeyColumn(this)]: primaryKey,
-        } as unknown as ModelSchema,
+          [primaryKeyColumn]: primaryKey,
+        } as unknown as Schema,
+        limit: 1,
       });
       const modelInstance = result[0];
       if (!modelInstance) {
-        throw new Error("Not found");
+        throw new Error(
+          `${this.modelName} with ${primaryKeyColumn}=${primaryKey} does not exist`,
+        );
       }
       return modelInstance;
     }
 
     static async update(
       id: Pk,
-      data: Partial<ModelSchema>,
+      data: Partial<Schema>,
     ): Promise<number> {
       const set = (column: string, index: number) => `${column} = $${index}`;
       const argOffset = 2;
@@ -318,14 +322,14 @@ export function defineModel<
       return row.id;
     }
 
-    static async destroy(id: Pk): Promise<WithId> {
+    static async destroy(primaryKey: Pk): Promise<WithId> {
       const rows = await client!.queryObject<WithId>({
         text: `
           DELETE FROM ${this.tableName}
-          WHERE ${this.tableName}.id = $1
+          WHERE ${this.tableName}.${this} = $1
           RETURNING id
           `,
-        args: [id],
+        args: [primaryKey],
       }).then((result) => result.rows);
       return rows[0];
     }
@@ -361,13 +365,13 @@ export function defineModel<
 
     async reload(): Promise<this> {
       assertPersisted(this, Model);
-      const clone = await Model.findByPk(this.primaryKey!);
+      const clone = await Model.find(this.primaryKey!);
       this.set(clone.dataValues);
       return this;
     }
 
     async update(
-      data: Partial<ModelSchema>,
+      data: Partial<Schema>,
     ): Promise<this> {
       assertPersisted(this, Model);
       await Model.update(this.primaryKey!, data);
@@ -389,38 +393,37 @@ export function defineModel<
   return Model as
     & typeof Model
     & ModelStatic
-    & Constructor<ModelSchema>;
+    & Constructor<Schema>;
 }
 
 type TypeMap = {
-  "string": string;
+  "text": string;
   "uuid": string;
   "integer": number;
   "boolean": boolean;
   [dataType: `date${string | undefined}`]: Date;
-  "timestamp": Date;
+  [dataType: `timestamp${string | undefined}`]: Date;
 };
 
 type ColumnType = keyof TypeMap;
 
-type TranslateDefinition<
+type ModelSchema<
   Definition extends ModelDefinition,
   Columns = Definition["columns"],
 > = {
   [Col in keyof Columns]: Columns[Col] extends ColumnType
-    ? GetOptionality<Columns[Col], TypeMap[Columns[Col]]>
+    ? Optionality<Columns[Col], TypeMap[Columns[Col]]>
     : Columns[Col] extends { type: ColumnType }
-      ? GetOptionality<Columns[Col], TypeMap[Columns[Col]["type"]]>
+      ? Optionality<Columns[Col], TypeMap[Columns[Col]["type"]]>
     : "Unsupported data type";
 };
 
-type GetOptionality<
+type Optionality<
   Column extends ColumnDefinition | ColumnType,
   Type,
 > = Column extends { notNull: true } | { primaryKey: true } ? Type
   : Type | null;
 
-type Something = GetOptionality<"integer", string>;
 
 /* class ORM<TMap extends ModelMap = {}> {
   models: TMap = {} as TMap;
