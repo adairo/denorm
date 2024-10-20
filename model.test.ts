@@ -36,11 +36,11 @@ describe("Extended Model class", () => {
     tableName: "_",
   }) {}
 
-  describe('build', ()=> {
-    it('returns an instance of the Extended class', () => {
-      expect(Extended.build({})).toBeInstanceOf(Extended)
-    })
-  })
+  describe("build", () => {
+    it("returns an instance of the Extended class", () => {
+      expect(Extended.build({})).toBeInstanceOf(Extended);
+    });
+  });
 });
 
 describe("Unextended Model class", () => {
@@ -188,7 +188,7 @@ describe("Unextended Model class", () => {
       userInstance = User.build(userData);
     });
 
-    describe("set method", () => {
+    describe("set()", () => {
       it("stores multiple values passed", () => {
         const updatedData = { first_name: "Changed", id: 10 };
         userInstance.set(updatedData);
@@ -223,6 +223,15 @@ describe("Unextended Model class", () => {
           [userInstance.id],
         );
         expect(result?.rowFound).toBeTruthy();
+      });
+    });
+
+    describe("update()", () => {
+      it("throws if its called on a non persisted instance", () => {
+        const nonPersisted = new User();
+        expect(nonPersisted.update({ first_name: "_" })).rejects.toThrow(
+          "model instance is not persisted yet",
+        );
       });
     });
   });
