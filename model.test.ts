@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-explicit-any
 import {
   afterAll,
   beforeAll,
@@ -8,7 +9,6 @@ import {
 import { defineModel } from "./model.ts";
 import { expect } from "jsr:@std/expect";
 import { Client } from "https://deno.land/x/postgres@v0.19.3/mod.ts";
-
 
 describe({
   name: "defineModel function",
@@ -119,14 +119,38 @@ describe("Unextended Model class", () => {
 
     describe("find()", () => {
       let user = new User();
+      const userData = { first_name: "Find", last_name: "Method" };
 
       beforeEach(async () => {
-        user = await User.create({ first_name: "Find", last_name: "Method" });
+        user = await User.create(userData);
       });
 
-      it("Returns an instance of the model", async () => {
-        user = await User.findByPk(user.id);
-        expect(user).toBeInstanceOf(User)
+      it("Returns a persisted instance of the model", async () => {
+        user = await User.find(user.id);
+        expect(user).toBeInstanceOf(User);
+        expect(user.persisted).toBeTruthy();
+      });
+
+      it("Has the provided dataValues", async () => {
+        user = await User.find(user.id);
+        expect(user.first_name).toEqual(userData.first_name);
+        expect(user.last_name).toEqual(userData.last_name);
+      });
+
+      it("Fetches only passed columns if specified", async () => {
+        user = await User.find(user.id, ["last_name"]);
+        expect(user.id).toBeNull();
+        expect(user.first_name).toBeNull();
+        expect(user.last_name).toBe(userData.last_name);
+      });
+
+      it("Throws if passed nullish param", () => {
+        expect(User.find(null as any)).rejects.toThrow();
+        expect(User.find(undefined as any)).rejects.toThrow();
+      });
+
+      it("Throws if it doesnt find a row with that Pk", () => {
+        expect(User.find(-1)).rejects.toThrow();
       });
     });
   });
