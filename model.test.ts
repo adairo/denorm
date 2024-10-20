@@ -30,6 +30,19 @@ describe({
   });
 });
 
+describe("Extended Model class", () => {
+  class Extended extends defineModel("Original", {
+    columns: { id: "text" },
+    tableName: "_",
+  }) {}
+
+  describe('build', ()=> {
+    it('returns an instance of the Extended class', () => {
+      expect(Extended.build({})).toBeInstanceOf(Extended)
+    })
+  })
+});
+
 describe("Unextended Model class", () => {
   let db: Client;
 
@@ -62,8 +75,8 @@ describe("Unextended Model class", () => {
     tableName: "users",
     columns: {
       id: { type: "integer", primaryKey: true },
-      first_name: "string",
-      last_name: "string",
+      first_name: "text",
+      last_name: "text",
     },
   } as const;
 
@@ -145,12 +158,14 @@ describe("Unextended Model class", () => {
       });
 
       it("Throws if passed nullish param", () => {
-        expect(User.find(null as any)).rejects.toThrow('is not a valid identifier');
+        expect(User.find(null as any)).rejects.toThrow(
+          "is not a valid identifier",
+        );
         expect(User.find(undefined as any)).rejects.toThrow();
       });
 
       it("Throws if it doesnt find a row with that Pk", () => {
-        expect(User.find(-1)).rejects.toThrow('User with id=-1 does not exist');
+        expect(User.find(-1)).rejects.toThrow("User with id=-1 does not exist");
       });
 
       it("Throws if the model does not define a PK", () => {
