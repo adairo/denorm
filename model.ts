@@ -192,7 +192,13 @@ export function defineModel<
     }
 
     public set(dataValues: Partial<Schema>) {
-      this.#dataValues = { ...this.#dataValues, ...dataValues };
+      const modelColumns = Model.columns();
+      this.#dataValues = Object.keys(dataValues).reduce((values, column) => {
+        if (modelColumns.includes(column)) {
+          (values[column] as any) = dataValues[column];
+        }
+        return values;
+      }, { ...this.#dataValues });
       return this;
     }
 
@@ -201,34 +207,32 @@ export function defineModel<
     static primaryKeyColumn = getPrimaryKeyColumn(this.modelDefinition.columns);
 
     constructor() {
-      const allColumns = Object.entries(Model.modelDefinition.columns);
+      const allColumns = Object.keys(Model.modelDefinition.columns);
 
-      this.#primaryKeyColumn = getPrimaryKeyColumn(modelDefinition.columns);
-      this.#dataValues = allColumns.reduce((object, [key, value]) => {
-        if (
-          typeof value === "object" && "primaryKey" in value &&
-          value.primaryKey === true
-        ) {
-          this.#primaryKeyColumn = key;
-        }
-        Object.defineProperty(object, key, {
+      this.#primaryKeyColumn = getPrimaryKeyColumn(
+        Model.modelDefinition.columns,
+      );
+      this.#dataValues = allColumns.reduce((object, column) => {
+        Object.defineProperty(object, column, {
           value: null,
           enumerable: true,
-          writable: true,
+          writable: false,
         });
         return object;
       }, Object.create(null));
 
-      allColumns.forEach((
-        [columnKey],
-      ) =>
-        Object.defineProperty(this, columnKey, {
+      allColumns.forEach((column) =>
+        Object.defineProperty(this, column, {
           get() {
-            return this.dataValues[columnKey];
+            return this.dataValues[column];
           },
           enumerable: true,
         })
       );
+    }
+
+    static columns() {
+      return Object.keys(this.modelDefinition.columns);
     }
 
     static async select<ConcreteModel extends typeof Model>(

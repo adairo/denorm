@@ -201,6 +201,14 @@ describe("Unextended Model class", () => {
         expect(result).toBe(user.id);
       });
     });
+
+    describe("static columns()", () => {
+      it("returns an array of all model columns", () => {
+        expect(new Set(User.columns())).toStrictEqual(
+          new Set(["first_name", "last_name", "id"]),
+        );
+      });
+    });
   });
 
   describe("instance methods", () => {
@@ -217,6 +225,12 @@ describe("Unextended Model class", () => {
         userInstance.set(updatedData);
         const { first_name, id } = userInstance;
         expect({ first_name, id }).toEqual(updatedData);
+      });
+
+      it("ignores columns not present on model definition", () => {
+        userInstance.set({ first_name: "Defined", age: 2 } as any);
+        expect((userInstance as any).age).toBeUndefined();
+        expect((userInstance.dataValues as any).age).toBeUndefined();
       });
     });
 
