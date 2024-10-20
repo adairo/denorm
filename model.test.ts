@@ -208,7 +208,25 @@ describe("Unextended Model class", () => {
       });
     });
 
-    describe("static columns()", () => {
+    describe("Model.delete()", () => {
+      it("removes the row from db", async () => {
+        const user = await User.create({ first_name: "_", last_name: "" });
+        await User.delete(user.id);
+        expect(User.find(user.id)).rejects.toThrow("does not exist");
+      });
+
+      it("returns the id of deleted row", async () => {
+        const user = await User.create({ first_name: "_", last_name: "" });
+        const result = await User.delete(user.id);
+        expect(result).toBe(user.id);
+      });
+
+      it("Throws if no row was deleted", () => {
+        expect(User.delete(-1)).rejects.toThrow("it was not found");
+      });
+    });
+
+    describe("Model.columns()", () => {
       it("returns an array of all model columns", () => {
         expect(new Set(User.columns())).toStrictEqual(
           new Set(["first_name", "last_name", "id"]),
@@ -225,7 +243,7 @@ describe("Unextended Model class", () => {
       userInstance = User.build(userData);
     });
 
-    describe("set()", () => {
+    describe("Model.prototype.set()", () => {
       it("stores multiple values passed", () => {
         const updatedData = { first_name: "Changed", id: 10 };
         userInstance.set(updatedData);
@@ -240,7 +258,7 @@ describe("Unextended Model class", () => {
       });
     });
 
-    describe("save()", () => {
+    describe("Model.prototype.save()", () => {
       it("the primaryKey is saved", async () => {
         expect(userInstance.primaryKey).toBeNull();
         await userInstance.save();
@@ -269,7 +287,7 @@ describe("Unextended Model class", () => {
       });
     });
 
-    describe("update()", () => {
+    describe("Model.prototype.update()", () => {
       it("throws if its called on a non persisted instance", () => {
         const nonPersisted = new User();
         expect(nonPersisted.update({ first_name: "_" })).rejects.toThrow(
@@ -297,5 +315,9 @@ describe("Unextended Model class", () => {
         expect(updated).toStrictEqual(userInstance);
       });
     });
+
+    describe('Model.prototype.delete()', () => {
+      
+    })
   });
 });

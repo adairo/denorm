@@ -328,16 +328,24 @@ export function defineModel<
       return row.id;
     }
 
-    static async destroy(primaryKey: Pk): Promise<WithId> {
-      const rows = await client!.queryObject<WithId>({
+    static async delete(primaryKey: Pk): Promise<Pk> {
+      const rows = await client!.queryObject<PrimaryKey>({
         text: `
           DELETE FROM ${this.tableName}
-          WHERE ${this.tableName}.${this} = $1
-          RETURNING id
+          WHERE ${this.tableName}.${this.primaryKeyColumn} = $1
+          RETURNING ${this.primaryKeyColumn}
           `,
         args: [primaryKey],
       }).then((result) => result.rows);
-      return rows[0];
+      const [result] = rows;
+
+      if (!result) {
+        throw new Error(
+          `${this.modelName} with ${this.primaryKeyColumn}=${primaryKey} was not deleted because it was not found`,
+        );
+      }
+
+      return result[this.primaryKeyColumn as any];
     }
 
     /** Public instance methods */
@@ -384,9 +392,9 @@ export function defineModel<
       return await this.reload();
     }
 
-    async destroy(): Promise<this> {
+    async delete(): Promise<this> {
       assertPersisted(this, Model);
-      await Model.destroy(this.primaryKey!);
+      await Model.delete(this.primaryKey!);
       this.#persisted = false;
       this.set({ id: null } as any);
       return this as any;
