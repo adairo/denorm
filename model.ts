@@ -145,6 +145,8 @@ export function defineModel<
     #primaryKeyProperty: string | null = null;
     #persisted: boolean = false;
 
+    /** Getters and setters */
+
     get primaryKey(): Pk | null {
       if (this.#primaryKeyProperty === null) {
         return null;
@@ -156,32 +158,28 @@ export function defineModel<
       return this.#primaryKeyProperty;
     }
 
+    set primaryKeyProperty(pk: string | null) {
+      this.#primaryKeyProperty = pk;
+    }
+
     get persisted(): boolean {
       return this.#persisted;
+    }
+
+    private set persisted(persisted: boolean) {
+      this.#persisted = persisted;
     }
 
     get dataValues() {
       return this.#dataValues;
     }
 
-    static async select<ConcreteModel extends typeof Model>(
-      this: ConcreteModel,
-      columnsOrValues: Array<keyof ModelSchema>,
-      queryOptions: Omit<SelectQuery<ModelSchema>, "from">,
-    ): Promise<Array<InstanceOf<ConcreteModel>>> {
-      const result = await select<ModelSchema>(columnsOrValues, {
-        ...queryOptions,
-        from: this.tableName,
-      });
-      return result.rows.map((row) =>
-        new this().set(row).setPersisted(true)
-      ) as any;
-    }
-
-    private setPersisted(persisted: boolean) {
-      this.#persisted = persisted;
+    public set(dataValues: Partial<ModelSchema>) {
+      this.#dataValues = { ...this.#dataValues, ...dataValues };
       return this;
     }
+
+    /** Static methods */
 
     constructor() {
       const allColumns = Object.entries(Model.modelDefinition.columns);
@@ -213,6 +211,22 @@ export function defineModel<
       );
     }
 
+    static async select<ConcreteModel extends typeof Model>(
+      this: ConcreteModel,
+      columnsOrValues: Array<keyof ModelSchema>,
+      queryOptions: Omit<SelectQuery<ModelSchema>, "from">,
+    ): Promise<Array<InstanceOf<ConcreteModel>>> {
+      const result = await select<ModelSchema>(columnsOrValues, {
+        ...queryOptions,
+        from: this.tableName,
+      });
+      return result.rows.map((row) => {
+        const instance = new this().set(row);
+        instance.persisted = true;
+        return instance as InstanceOf<ConcreteModel>;
+      });
+    }
+
     static build<ConcreteModel extends typeof Model>(
       this: ConcreteModel,
       values: Partial<ModelSchema>,
@@ -222,21 +236,16 @@ export function defineModel<
       ) as any;
     }
 
-    public set(dataValues: Partial<ModelSchema>) {
-      this.#dataValues = { ...this.#dataValues, ...dataValues };
-      return this;
-    }
-
     static create<ConcreteModel extends typeof Model>(
       this: ConcreteModel,
       values:
         & Omit<ModelSchema, keyof PrimaryKey>
         & Optional<PrimaryKey>,
     ): Promise<InstanceOf<ConcreteModel>> {
-      return this.build(values).save() as any;
+      return this.build(values).save();
     }
 
-    static find<ConcreteModel extends typeof Model>(
+    static async find<ConcreteModel extends typeof Model>(
       this: ConcreteModel,
       primaryKey: Pk,
       columnsOrValues: Array<keyof ModelSchema> = Object.keys(
@@ -246,17 +255,55 @@ export function defineModel<
       if (primaryKey === null || typeof primaryKey === "undefined") {
         throw new Error(`${primaryKey} is not a valid identifier`);
       }
-      return this.select(columnsOrValues, {
+      const result = await this.select(columnsOrValues, {
         where: { primaryKey } as unknown as ModelSchema,
-      }).then((result) => {
-        const modelInstance = result[0];
-        if (!modelInstance) {
-          throw new Error("Not found");
-        }
-
-        return modelInstance;
-      }) as any;
+      });
+      const modelInstance = result[0];
+      if (!modelInstance) {
+        throw new Error("Not found");
+      }
+      return modelInstance;
     }
+
+    static async update(
+      id: Pk,
+      data: Partial<ModelSchema>,
+    ): Promise<number> {
+      const set = (column: string, index: number) => `${column} = $${index}`;
+      const argOffset = 2;
+
+      const entries = Object.entries(data);
+      const updatedFields = entries.map((entry) => entry.at(0) as string).map(
+        (column, index) => set(column, index + argOffset), // start at 2
+      ).join(",");
+      const args = [id].concat(entries.map((entry) => entry.at(1)));
+
+      const [row] = await client!.queryObject<WithId>({
+        text: `
+          UPDATE ${this.tableName}
+          SET ${updatedFields}
+          WHERE ${this.tableName}.id = $1
+          RETURNING id
+          `,
+        args,
+      }).then((result) => result.rows);
+
+      return row.id;
+    }
+
+    static async destroy(id: Pk): Promise<WithId> {
+      const rows = await client!.queryObject<WithId>({
+        text: `
+          DELETE FROM ${this.tableName}
+          WHERE ${this.tableName}.id = $1
+          RETURNING id
+          `,
+        args: [id],
+      }).then((result) => result.rows);
+      return rows[0];
+    }
+
+    /** Public instance methods */
 
     async save(): Promise<this> {
       const { id: _id, ...values } = this.#dataValues;
@@ -300,32 +347,6 @@ export function defineModel<
       return await this.reload();
     }
 
-    static async update(
-      id: Pk,
-      data: Partial<ModelSchema>,
-    ): Promise<number> {
-      const set = (column: string, index: number) => `${column} = $${index}`;
-      const argOffset = 2;
-
-      const entries = Object.entries(data);
-      const updatedFields = entries.map((entry) => entry.at(0) as string).map(
-        (column, index) => set(column, index + argOffset), // start at 2
-      ).join(",");
-      const args = [id].concat(entries.map((entry) => entry.at(1)));
-
-      const [row] = await client!.queryObject<WithId>({
-        text: `
-          UPDATE ${this.tableName}
-          SET ${updatedFields}
-          WHERE ${this.tableName}.id = $1
-          RETURNING id
-          `,
-        args,
-      }).then((result) => result.rows);
-
-      return row.id;
-    }
-
     async destroy(): Promise<this> {
       assertPersisted(this, Model);
       await Model.destroy(this.primaryKey!);
@@ -336,18 +357,6 @@ export function defineModel<
 
     toJSON() {
       return JSON.stringify(this.#dataValues);
-    }
-
-    static async destroy(id: Pk): Promise<WithId> {
-      const rows = await client!.queryObject<WithId>({
-        text: `
-          DELETE FROM ${this.tableName}
-          WHERE ${this.tableName}.id = $1
-          RETURNING id
-          `,
-        args: [id],
-      }).then((result) => result.rows);
-      return rows[0];
     }
   }
   return Model as
