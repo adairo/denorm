@@ -119,16 +119,18 @@ type GetPrimaryKey<Columns extends ModelDefinition["columns"]> = {
     : never;
 };
 
-type PrimaryKey<Columns extends ModelDefinition["columns"]> = GetPrimaryKey<
-  Columns
-> extends { [key: PropertyKey]: infer T } ? T : never;
+type Optional<T extends Record<PropertyKey, any>> = {
+  [K in keyof T]?: T[K];
+};
 
-type a = PrimaryKey<{ uuid: { type: "string"; primaryKey: true } }>;
+type Values<Object extends Record<any, any>> = Object extends
+  { [key: PropertyKey]: infer T } ? T : never;
 
 export function defineModel<
   Definition extends ModelDefinition,
   ModelSchema extends Record<string, any> = TranslateDefinition<Definition>,
-  Pk = PrimaryKey<Definition["columns"]>,
+  PrimaryKey extends Record<any, any> = GetPrimaryKey<Definition["columns"]>,
+  Pk = Values<PrimaryKey>,
 >(
   modelName: string,
   modelDefinition: Definition,
@@ -227,7 +229,9 @@ export function defineModel<
 
     static create<ConcreteModel extends typeof Model>(
       this: ConcreteModel,
-      values: ModelSchema,
+      values:
+        & Omit<ModelSchema, keyof PrimaryKey>
+        & Optional<PrimaryKey>,
     ): Promise<InstanceOf<ConcreteModel>> {
       return this.build(values).save() as any;
     }
