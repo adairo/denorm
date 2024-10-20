@@ -5,6 +5,7 @@ import {
   describe,
   it,
 } from "jsr:@std/testing/bdd";
+import { spy } from "jsr:@std/testing/mock";
 import { defineModel } from "./model.ts";
 import { expect } from "jsr:@std/expect";
 import { Client } from "https://deno.land/x/postgres@v0.19.3/mod.ts";
@@ -104,6 +105,17 @@ describe("Unextended Model class", () => {
         expect(user.persisted).toBe(false);
       });
     });
+
+    describe("create()", () => {
+      it("directly creates a persisted instance", async () => {
+        const user = await User.create({
+          first_name: "Foo",
+          last_name: "Bar",
+        });
+        expect(user.persisted).toBeTruthy()
+        expect(user.primaryKey).toBeDefined()
+      });
+    });
   });
 
   describe("instance methods", () => {
@@ -123,7 +135,7 @@ describe("Unextended Model class", () => {
       });
     });
 
-    describe("save method", () => {
+    describe("save()", () => {
       it("the primaryKey is saved", async () => {
         expect(userInstance.primaryKey).toBeNull();
         await userInstance.save();
