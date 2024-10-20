@@ -159,24 +159,24 @@ export function defineModel<
     static tableName: string = modelDefinition.tableName;
     static modelDefinition: Definition = modelDefinition;
     #dataValues: Schema;
-    #primaryKeyProperty: string | null = null;
+    #primaryKeyColumn: string | null = null;
     #persisted: boolean = false;
 
     /** Getters and setters */
 
     get primaryKey(): Pk | null {
-      if (this.#primaryKeyProperty === null) {
+      if (this.#primaryKeyColumn === null) {
         return null;
       }
-      return this.dataValues[this.#primaryKeyProperty];
+      return this.dataValues[this.#primaryKeyColumn];
     }
 
     get primaryKeyProperty(): string | null {
-      return this.#primaryKeyProperty;
+      return this.#primaryKeyColumn;
     }
 
     set primaryKeyProperty(pk: string | null) {
-      this.#primaryKeyProperty = pk;
+      this.#primaryKeyColumn = pk;
     }
 
     get persisted(): boolean {
@@ -196,18 +196,20 @@ export function defineModel<
       return this;
     }
 
-    /** Static methods */
+    /** Static members */
+
+    static primaryKeyColumn = getPrimaryKeyColumn(this.modelDefinition.columns);
 
     constructor() {
       const allColumns = Object.entries(Model.modelDefinition.columns);
 
-      this.#primaryKeyProperty = getPrimaryKeyColumn(modelDefinition.columns);
+      this.#primaryKeyColumn = getPrimaryKeyColumn(modelDefinition.columns);
       this.#dataValues = allColumns.reduce((object, [key, value]) => {
         if (
           typeof value === "object" && "primaryKey" in value &&
           value.primaryKey === true
         ) {
-          this.#primaryKeyProperty = key;
+          this.#primaryKeyColumn = key;
         }
         Object.defineProperty(object, key, {
           value: null,
@@ -247,7 +249,7 @@ export function defineModel<
 
     static build<ConcreteModel extends typeof Model>(
       this: ConcreteModel,
-      values: Partial<Schema>,
+      values: Partial<Schema> = {},
     ): InstanceType<ConcreteModel> {
       return new this().set(
         values,
@@ -297,7 +299,7 @@ export function defineModel<
     }
 
     static async update(
-      id: Pk,
+      primaryKey: Pk,
       data: Partial<Schema>,
     ): Promise<number> {
       const set = (column: string, index: number) => `${column} = $${index}`;
@@ -307,14 +309,14 @@ export function defineModel<
       const updatedFields = entries.map((entry) => entry.at(0) as string).map(
         (column, index) => set(column, index + argOffset), // start at 2
       ).join(",");
-      const args = [id].concat(entries.map((entry) => entry.at(1)));
+      const args = [primaryKey].concat(entries.map((entry) => entry.at(1)));
 
       const [row] = await client!.queryObject<WithId>({
         text: `
           UPDATE ${this.tableName}
           SET ${updatedFields}
-          WHERE ${this.tableName}.id = $1
-          RETURNING id
+          WHERE ${this.tableName}.${this.primaryKeyColumn} = $1
+          RETURNING ${this.primaryKeyColumn}
           `,
         args,
       }).then((result) => result.rows);
@@ -423,7 +425,6 @@ type Optionality<
   Type,
 > = Column extends { notNull: true } | { primaryKey: true } ? Type
   : Type | null;
-
 
 /* class ORM<TMap extends ModelMap = {}> {
   models: TMap = {} as TMap;

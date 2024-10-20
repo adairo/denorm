@@ -87,7 +87,7 @@ describe("Unextended Model class", () => {
   });
 
   describe("static methods", () => {
-    describe("build", () => {
+    describe("static build()", () => {
       it("stores the dataValues", () => {
         const userData = { first_name: "Foo", last_name: "Bar", id: 1 };
         const user = User.build(userData);
@@ -119,7 +119,7 @@ describe("Unextended Model class", () => {
       });
     });
 
-    describe("create()", () => {
+    describe("static create()", () => {
       it("directly creates a persisted instance", async () => {
         const user = await User.create({
           first_name: "Foo",
@@ -130,7 +130,7 @@ describe("Unextended Model class", () => {
       });
     });
 
-    describe("find()", () => {
+    describe("static find()", () => {
       let user = new User();
       const userData = { first_name: "Find", last_name: "Method" };
 
@@ -176,6 +176,29 @@ describe("Unextended Model class", () => {
         expect(ModelWithoutPk.find(1 /** valid pk */)).rejects.toThrow(
           "model doesn't have a known primary key",
         );
+      });
+    });
+
+    describe("static update()", () => {
+      let user = new User();
+      const initialValues = {
+        first_name: "John",
+        last_name: "Values",
+      };
+
+      beforeEach(async () => {
+        user = await User.create(initialValues);
+      });
+
+      it("Updates values on db", async () => {
+        await User.update(user.id, { first_name: "Updated" });
+        const retrieved = await User.find(user.id);
+        expect(retrieved.first_name).toBe("Updated");
+      });
+
+      it("Returns the id of the updated row", async () => {
+        const result = await User.update(user.id, { first_name: "Updated" });
+        expect(result).toBe(user.id);
       });
     });
   });
