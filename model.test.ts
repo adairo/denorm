@@ -6,6 +6,12 @@ import {
   describe,
   it,
 } from "jsr:@std/testing/bdd";
+import {
+  assertSpyCall,
+  assertSpyCalls,
+  spy,
+  stub,
+} from "jsr:@std/testing/mock";
 import { defineModel } from "./model.ts";
 import { expect } from "jsr:@std/expect";
 import { Client } from "https://deno.land/x/postgres@v0.19.3/mod.ts";
@@ -269,6 +275,26 @@ describe("Unextended Model class", () => {
         expect(nonPersisted.update({ first_name: "_" })).rejects.toThrow(
           "model instance is not persisted yet",
         );
+      });
+
+      it("calls static update()", async () => {
+        using updateSpy = stub(User, "update");
+        const user = await User.create({ first_name: "_", last_name: "" });
+        user.update({
+          first_name: "stubbed",
+        });
+
+        assertSpyCalls(updateSpy, 1);
+        assertSpyCall(updateSpy, 0, {
+          args: [user.id, { first_name: "stubbed" }],
+        });
+      });
+
+      it("returns the instance itself", async () => {
+        const updated = await userInstance.save().then(() =>
+          userInstance.update({ first_name: "_" })
+        );
+        expect(updated).toStrictEqual(userInstance);
       });
     });
   });
