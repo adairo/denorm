@@ -197,14 +197,21 @@ describe("Unextended Model class", () => {
       });
 
       it("Updates values on db", async () => {
-        await User.update(user.id, { first_name: "Updated" });
+        await User.update({
+          set: { first_name: "Updated" },
+          where: { id: user.id },
+        });
         const retrieved = await User.find(user.id);
         expect(retrieved.first_name).toBe("Updated");
       });
 
-      it("Returns the id of the updated row", async () => {
-        const result = await User.update(user.id, { first_name: "Updated" });
-        expect(result).toBe(user.id);
+      it("Returns the specified columns", async () => {
+        const result = await User.update({
+          set: { first_name: "Updated" },
+          where: { id: user.id },
+          returning: ["id"],
+        });
+        expect(result.id).toBe(user.id);
       });
     });
 
@@ -304,7 +311,10 @@ describe("Unextended Model class", () => {
 
         assertSpyCalls(updateSpy, 1);
         assertSpyCall(updateSpy, 0, {
-          args: [user.id, { first_name: "stubbed" }],
+          args: [{
+            set: { first_name: "stubbed" },
+            where: { id: user.id },
+          }],
         });
       });
 
@@ -316,8 +326,7 @@ describe("Unextended Model class", () => {
       });
     });
 
-    describe('Model.prototype.delete()', () => {
-      
-    })
+    describe("Model.prototype.delete()", () => {
+    });
   });
 });

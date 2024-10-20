@@ -1,6 +1,12 @@
 // deno-lint-ignore-file no-explicit-any
 
 import { Client } from "https://deno.land/x/postgres@v0.19.3/mod.ts";
+import {
+  select,
+  type SelectQuery,
+  update,
+  type UpdateQuery,
+} from "./queries.ts";
 
 let client: Client | undefined;
 
@@ -77,59 +83,6 @@ type ColumnDefinition = {
   primaryKey?: boolean;
   references?: ModelStatic;
 };
-
-type SelectQuery<Model extends Record<string, any>> = {
-  where?: Partial<
-    Record<keyof Model, any>
-  >;
-  from: string;
-  orderBy?: Array<
-    [
-      keyof Model,
-      "ASC" | "DESC",
-    ]
-  >;
-  limit?: number;
-  offset?: number;
-};
-
-export function select<
-  Columns extends Record<string, any>,
->(
-  columnsOrValues: Array<keyof Columns>,
-  queryDefinition: SelectQuery<Columns>,
-) {
-  return client!.queryObject<Partial<Columns>>({
-    text: `
-      SELECT
-        ${columnsOrValues.join(",")}
-      FROM
-        ${queryDefinition.from}
-        ${
-      queryDefinition.where
-        ? `WHERE
-        ${
-          Object.entries(queryDefinition.where ?? {}).map(([col, value]) =>
-            `${col} = '${value}'`
-          )
-            .join(" AND ")
-        }`
-        : ""
-    }
-    ${
-      queryDefinition.orderBy
-        ? ` ORDER BY ${
-          queryDefinition.orderBy.map(([col, order]) =>
-            `${String(col)} ${order}`
-          ).join(", ")
-        }`
-        : ""
-    }
-      
-     ${queryDefinition.limit ? `LIMIT ${queryDefinition.limit}` : ""}
-    `,
-  });
-}
 
 type GetPrimaryKey<Columns extends ModelDefinition["columns"]> = {
   [
@@ -243,7 +196,7 @@ export function defineModel<
       const result = await select<Schema>(columnsOrValues, {
         ...queryOptions,
         from: this.tableName,
-      });
+      }, client!);
       return result.rows.map((row) => {
         const instance = new this().set(row);
         instance.persisted = true;
@@ -302,18 +255,22 @@ export function defineModel<
       return modelInstance;
     }
 
-    static async update(
-      primaryKey: Pk,
-      data: Partial<Schema>,
-    ): Promise<number> {
-      const set = (column: string, index: number) => `${column} = $${index}`;
-      const argOffset = 2;
+    static update(
+      query: UpdateQuery<Partial<Schema>>,
+    ): Promise<any> {
+      return update(this.tableName, query, client!);
+      /* const argOffset = 2;
 
-      const entries = Object.entries(data);
-      const updatedFields = entries.map((entry) => entry.at(0) as string).map(
-        (column, index) => set(column, index + argOffset), // start at 2
-      ).join(",");
-      const args = [primaryKey].concat(entries.map((entry) => entry.at(1)));
+      const updateEntries = entries(data);
+      const updatedFields = createWhereClause(
+        updateEntries.keys,
+        argOffset,
+        ",",
+        "=",
+      );
+      const args = [primaryKey].concat(
+        updateEntries.values,
+      );
 
       const [row] = await client!.queryObject<WithId>({
         text: `
@@ -325,7 +282,7 @@ export function defineModel<
         args,
       }).then((result) => result.rows);
 
-      return row.id;
+      return row.id; */
     }
 
     static async delete(primaryKey: Pk): Promise<Pk> {
@@ -388,7 +345,10 @@ export function defineModel<
       data: Partial<Schema>,
     ): Promise<this> {
       assertPersisted(this, Model);
-      await Model.update(this.primaryKey!, data);
+      await Model.update({
+        set: data,
+        where: { [this.primaryKeyProperty as any]: this.primaryKey },
+      });
       return await this.reload();
     }
 
