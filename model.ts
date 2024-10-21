@@ -345,11 +345,12 @@ export function defineModel<
       data: Partial<Schema>,
     ): Promise<this> {
       assertPersisted(this, Model);
+      this.set(data)
       await Model.update({
         set: data,
         where: { [this.primaryKeyProperty as any]: this.primaryKey },
       });
-      return await this.reload();
+      return this;
     }
 
     async delete(): Promise<this> {

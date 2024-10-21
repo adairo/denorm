@@ -185,7 +185,7 @@ describe("Unextended Model class", () => {
       });
     });
 
-    describe("static update()", () => {
+    describe("Model.update()", () => {
       let user = new User();
       const initialValues = {
         first_name: "John",
@@ -301,6 +301,27 @@ describe("Unextended Model class", () => {
           "model instance is not persisted yet",
         );
       });
+
+      it("calls set() with the new values", async () => {
+        const user = await User.create({ first_name: "Foo", last_name: "Bar" });
+        const setStub = stub(user, "set");
+        await user.update({ first_name: "New" });
+        assertSpyCalls(setStub, 1);
+        assertSpyCall(setStub, 0, {
+          args: [{ first_name: "New" }],
+        });
+      });
+
+      it("calls Model.update() with the new values", async () => {
+        const user = await User.create({ first_name: "Foo", last_name: "Bar" });
+        const ModelUpdate = stub(User, "update");
+        await user.update({ first_name: "New" });
+        assertSpyCalls(ModelUpdate, 1);
+        assertSpyCall(ModelUpdate, 0, {
+          args: [{ set: { first_name: "New" }, where: { id: user.id } }],
+        });
+      });
+
 
       it("calls static update()", async () => {
         using updateSpy = stub(User, "update");
