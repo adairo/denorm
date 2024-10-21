@@ -79,18 +79,18 @@ export function select<
 }
 
 export type UpdateQuery<Model extends Record<string, any>> = {
-    set: Model;
+    set: Partial<Model>;
     where: Record<string, any>;
     returning?: Array<keyof Model> | string;
 };
 
 export async function update<
-    Columns extends Record<string, any>,
+    Schema extends Record<string, any>,
 >(
     tableName: string,
-    query: UpdateQuery<Columns>,
+    query: UpdateQuery<Schema>,
     client: Client,
-) {
+): Promise<Schema[]> {
     const whereEntries = entries(query.where);
     const whereConditions = createWhereClause(
         whereEntries.keys.map((condition) => `${tableName}.${condition}`),
@@ -111,7 +111,7 @@ export async function update<
         updateEntries.values,
     );
 
-    const [row] = await client.queryObject({
+    const rows = await client.queryObject({
         text: `
           UPDATE ${tableName}
           SET ${updatedFields}
@@ -129,5 +129,5 @@ export async function update<
         args,
     }).then((result) => result.rows);
 
-    return row;
+    return rows as any;
 }

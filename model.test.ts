@@ -206,7 +206,7 @@ describe("Unextended Model class", () => {
       });
 
       it("Returns the specified columns", async () => {
-        const result = await User.update({
+        const [result] = await User.update({
           set: { first_name: "Updated" },
           where: { id: user.id },
           returning: ["id"],
