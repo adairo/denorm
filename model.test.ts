@@ -113,7 +113,7 @@ describe("Unextended Model class", () => {
         });
         const user = ModelWithPk.build({ id: 1, uuid: "abc" });
         expect(user.primaryKey).toBe("abc");
-        expect(user.primaryKeyProperty).toBe("uuid");
+        expect(ModelWithPk.primaryKeyColumn).toBe("uuid");
       });
 
       it("creates a non persisted instance", () => {
@@ -241,18 +241,17 @@ describe("Unextended Model class", () => {
     describe("Model.delete()", () => {
       it("removes the row from db", async () => {
         const user = await User.insert({ first_name: "_", last_name: "" });
-        await User.delete(user.id);
+        await User.delete({ where: { id: user.id } });
         expect(User.find(user.id)).rejects.toThrow("does not exist");
       });
 
-      it("returns the id of deleted row", async () => {
+      it("can return the id of deleted row", async () => {
         const user = await User.insert({ first_name: "_", last_name: "" });
-        const result = await User.delete(user.id);
+        const [result] = await User.delete({
+          where: { id: user.id },
+          returning: "id",
+        });
         expect(result).toBe(user.id);
-      });
-
-      it("Throws if no row was deleted", () => {
-        expect(User.delete(-1)).rejects.toThrow("it was not found");
       });
     });
 

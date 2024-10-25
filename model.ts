@@ -2,6 +2,8 @@
 
 import { Client } from "https://deno.land/x/postgres@v0.19.3/mod.ts";
 import {
+  type DeleteQuery,
+  deleteQuery,
   insertInto,
   type InsertQuery,
   select,
@@ -120,18 +122,7 @@ export function defineModel<
     /** Getters and setters */
 
     get primaryKey(): Pk | null {
-      if (this.#primaryKeyColumn === null) {
-        return null;
-      }
-      return this.dataValues[this.#primaryKeyColumn];
-    }
-
-    get primaryKeyProperty(): string | null {
-      return this.#primaryKeyColumn;
-    }
-
-    set primaryKeyProperty(pk: string | null) {
-      this.#primaryKeyColumn = pk;
+      return this.dataValues[Model.primaryKeyColumn];
     }
 
     get persisted(): boolean {
@@ -164,9 +155,9 @@ export function defineModel<
     static {
       const pkColumn = getPrimaryKeyColumn(this.modelDefinition.columns);
       if (!pkColumn) {
-        throw new Error('It is mandatory for a model to define a primary key')
+        throw new Error("It is mandatory for a model to define a primary key");
       }
-      this.primaryKeyColumn = pkColumn
+      this.primaryKeyColumn = pkColumn;
     }
 
     constructor() {
@@ -201,7 +192,7 @@ export function defineModel<
     static async select<ConcreteModel extends typeof Model>(
       this: ConcreteModel,
       columnsOrValues: Array<keyof Schema>,
-      queryOptions: Omit<SelectQuery<Schema>, "from">,
+      queryOptions: Omit<SelectQuery, "from">,
     ): Promise<Array<InstanceType<ConcreteModel>>> {
       const result = await select<Schema>(columnsOrValues, {
         ...queryOptions,
@@ -262,24 +253,15 @@ export function defineModel<
       return update(this.tableName, query, client!);
     }
 
-    static async delete(primaryKey: Pk): Promise<Pk> {
-      const rows = await client!.queryObject<PrimaryKey>({
-        text: `
-          DELETE FROM ${this.tableName}
-          WHERE ${this.tableName}.${this.primaryKeyColumn} = $1
-          RETURNING ${this.primaryKeyColumn}
-          `,
-        args: [primaryKey],
-      }).then((result) => result.rows);
-      const [result] = rows;
+    static async delete<Returning extends Record<PropertyKey, any>>(
+      query: Omit<DeleteQuery, "from">,
+    ): Promise<Returning[]> {
+      const result = await deleteQuery<Returning>(
+        { ...query, from: this.tableName },
+        client!,
+      );
 
-      if (!result) {
-        throw new Error(
-          `${this.modelName} with ${this.primaryKeyColumn}=${primaryKey} was not deleted because it was not found`,
-        );
-      }
-
-      return result[this.primaryKeyColumn as any];
+      return result;
     }
 
     static insert<ConcreteModel extends typeof Model>(
@@ -321,14 +303,16 @@ export function defineModel<
       this.set(data);
       await Model.update({
         set: data,
-        where: { [this.primaryKeyProperty as any]: this.primaryKey },
+        where: { [Model.primaryKeyColumn]: this.primaryKey },
       });
       return this;
     }
 
     async delete(): Promise<this> {
       assertPersisted(this, Model);
-      await Model.delete(this.primaryKey!);
+      await Model.delete({
+        where: { [Model.primaryKeyColumn]: this.primaryKey },
+      });
       this.#persisted = false;
       this.set({ id: null } as any);
       return this as any;
