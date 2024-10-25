@@ -6,12 +6,7 @@ import {
   describe,
   it,
 } from "jsr:@std/testing/bdd";
-import {
-  assertSpyCall,
-  assertSpyCalls,
-  spy,
-  stub,
-} from "jsr:@std/testing/mock";
+import { assertSpyCall, assertSpyCalls, stub } from "jsr:@std/testing/mock";
 import { defineModel } from "./model.ts";
 import { expect } from "jsr:@std/expect";
 import { Client } from "https://deno.land/x/postgres@v0.19.3/mod.ts";
@@ -19,26 +14,28 @@ import { Client } from "https://deno.land/x/postgres@v0.19.3/mod.ts";
 describe({
   name: "defineModel function",
 }, () => {
-  const modelDefinition = {
-    tableName: "models",
-    columns: {},
-  };
-
   it("stores the Model definition", () => {
+    const modelDefinition = {
+      tableName: "models",
+      columns: { id: { type: "integer", primaryKey: true } },
+    } as const;
     const Model = defineModel("Model", modelDefinition);
     expect(Model.modelDefinition).toEqual(modelDefinition);
   });
 
-  it("returns a class that can be instantiated", () => {
-    const Model = defineModel("Model", modelDefinition);
-    const instance = new Model();
-    expect(instance).toBeInstanceOf(Model);
+  it("throws if the model does not define a primaryKey", () => {
+    expect(() =>
+      defineModel("_", {
+        tableName: "_",
+        columns: { id: "integer" },
+      }).build()
+    ).toThrow();
   });
 });
 
 describe("Extended Model class", () => {
   class Extended extends defineModel("Original", {
-    columns: { id: "text" },
+    columns: { id: { type: "text", primaryKey: true } },
     tableName: "_",
   }) {}
 
@@ -128,14 +125,16 @@ describe("Unextended Model class", () => {
     describe("Model.insert()", () => {
       it("returns a model instance", async () => {
         const user = await User.insert({
-          values: { first_name: "_", last_name: "_" },
+          first_name: "_",
+          last_name: "_",
         });
         expect(user).toBeInstanceOf(User);
       });
 
       it("stores the values passed", async () => {
         const user = await User.insert({
-          values: { first_name: "correct", last_name: "values" },
+          first_name: "correct",
+          last_name: "values",
         });
         expect(user.first_name).toBe("correct");
         expect(user.last_name).toBe("values");
@@ -143,10 +142,30 @@ describe("Unextended Model class", () => {
 
       it("returns a persisted instance with primaryKey", async () => {
         const user = await User.insert({
-          values: { first_name: "correct", last_name: "values" },
+          first_name: "correct",
+          last_name: "values",
         });
         expect(user.primaryKey).not.toBeNull();
         expect(user.persisted).toBeTruthy();
+      });
+
+      it("can be retrived from db", async () => {
+        const user = await User.insert({
+          first_name: "_",
+          last_name: "_",
+        });
+
+        const { rows: [result] } = await db.queryObject<
+          { rowFound: true } | null
+        >(
+          `
+          SELECT true "rowFound"
+          FROM users
+          WHERE id = $1
+        `,
+          [user.id],
+        );
+        expect(result?.rowFound).toBeTruthy();
       });
     });
 
@@ -155,7 +174,7 @@ describe("Unextended Model class", () => {
       const userData = { first_name: "Find", last_name: "Method" };
 
       beforeEach(async () => {
-        user = await User.insert({ values: userData });
+        user = await User.insert(userData);
       });
 
       it("Returns a persisted instance of the model", async () => {
@@ -187,16 +206,6 @@ describe("Unextended Model class", () => {
       it("Throws if it doesnt find a row with that Pk", () => {
         expect(User.find(-1)).rejects.toThrow("User with id=-1 does not exist");
       });
-
-      it("Throws if the model does not define a PK", () => {
-        const ModelWithoutPk = defineModel("_", {
-          columns: { foo: "integer" },
-          tableName: "_",
-        });
-        expect(ModelWithoutPk.find(1 /** valid pk */)).rejects.toThrow(
-          "model doesn't have a known primary key",
-        );
-      });
     });
 
     describe("Model.update()", () => {
@@ -207,7 +216,7 @@ describe("Unextended Model class", () => {
       };
 
       beforeEach(async () => {
-        user = await User.insert({ values: initialValues });
+        user = await User.insert(initialValues);
       });
 
       it("Updates values on db", async () => {
@@ -231,17 +240,13 @@ describe("Unextended Model class", () => {
 
     describe("Model.delete()", () => {
       it("removes the row from db", async () => {
-        const user = await User.insert({
-          values: { first_name: "_", last_name: "_" },
-        });
+        const user = await User.insert({ first_name: "_", last_name: "" });
         await User.delete(user.id);
         expect(User.find(user.id)).rejects.toThrow("does not exist");
       });
 
       it("returns the id of deleted row", async () => {
-        const user = await User.insert({
-          values: { first_name: "_", last_name: "_" },
-        });
+        const user = await User.insert({ first_name: "_", last_name: "" });
         const result = await User.delete(user.id);
         expect(result).toBe(user.id);
       });
@@ -283,35 +288,6 @@ describe("Unextended Model class", () => {
       });
     });
 
-    describe("Model.prototype.save()", () => {
-      it("the primaryKey is saved", async () => {
-        expect(userInstance.primaryKey).toBeNull();
-        await userInstance.save();
-        expect(userInstance).not.toBeNull();
-      });
-
-      it("makes the object persisted", async () => {
-        expect(userInstance.persisted).toBeFalsy();
-        await userInstance.save();
-        expect(userInstance).toBeTruthy();
-      });
-
-      it("can be retrived from db", async () => {
-        await userInstance.save();
-        const { rows: [result] } = await db.queryObject<
-          { rowFound: true } | null
-        >(
-          `
-          SELECT true "rowFound"
-          FROM users
-          WHERE id = $1
-        `,
-          [userInstance.id],
-        );
-        expect(result?.rowFound).toBeTruthy();
-      });
-    });
-
     describe("Model.prototype.update()", () => {
       it("throws if its called on a non persisted instance", () => {
         const nonPersisted = new User();
@@ -321,9 +297,7 @@ describe("Unextended Model class", () => {
       });
 
       it("calls set() with the new values", async () => {
-        const user = await User.insert({
-          values: { first_name: "Foo", last_name: "Bar" },
-        });
+        const user = await User.insert({ first_name: "Foo", last_name: "Bar" });
         const setStub = stub(user, "set");
         await user.update({ first_name: "New" });
         assertSpyCalls(setStub, 1);
@@ -333,9 +307,7 @@ describe("Unextended Model class", () => {
       });
 
       it("calls Model.update() with the new values", async () => {
-        const user = await User.insert({
-          values: { first_name: "Foo", last_name: "Bar" },
-        });
+        const user = await User.insert({ first_name: "Foo", last_name: "Bar" });
         const ModelUpdate = stub(User, "update");
         await user.update({ first_name: "New" });
         assertSpyCalls(ModelUpdate, 1);
@@ -346,9 +318,7 @@ describe("Unextended Model class", () => {
 
       it("calls Model.update()", async () => {
         using updateSpy = stub(User, "update");
-        const user = await User.insert({
-          values: { first_name: "_", last_name: "_" },
-        });
+        const user = await User.insert({ first_name: "_", last_name: "" });
         user.update({
           first_name: "stubbed",
         });
@@ -363,8 +333,8 @@ describe("Unextended Model class", () => {
       });
 
       it("returns the instance itself", async () => {
-        const updated = await userInstance.save().then(() =>
-          userInstance.update({ first_name: "_" })
+        const updated = await userInstance.save().then(
+          (u) => u.update({ first_name: "_" }),
         );
         expect(updated).toStrictEqual(userInstance);
       });

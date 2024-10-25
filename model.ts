@@ -159,7 +159,15 @@ export function defineModel<
 
     /** Static members */
 
-    static primaryKeyColumn = getPrimaryKeyColumn(this.modelDefinition.columns);
+    static primaryKeyColumn: string;
+
+    static {
+      const pkColumn = getPrimaryKeyColumn(this.modelDefinition.columns);
+      if (!pkColumn) {
+        throw new Error('It is mandatory for a model to define a primary key')
+      }
+      this.primaryKeyColumn = pkColumn
+    }
 
     constructor() {
       const modelColumns = Model.columns();
@@ -276,22 +284,16 @@ export function defineModel<
 
     static insert<ConcreteModel extends typeof Model>(
       this: ConcreteModel,
-      query: {
-        values:
-          & Omit<Schema, keyof PrimaryKey>
-          & Partial<PrimaryKey>;
-      },
+      values:
+        & Omit<Schema, keyof PrimaryKey>
+        & Partial<PrimaryKey>,
     ): Promise<InstanceType<ConcreteModel>> {
-      return this.build(query.values).save() as any;
+      return this.build(values).save() as any;
     }
 
     /** Public instance methods */
 
     async save(): Promise<this> {
-      if (!Model.primaryKeyColumn) {
-        throw new Error("Model doesnt have a known pk");
-      }
-
       const payload = Object.entries(this.#dataValues).filter(([_col, value]) =>
         value !== null
       );
