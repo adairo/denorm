@@ -131,3 +131,41 @@ export async function update<
 
     return rows as any;
 }
+
+export type InsertQuery = {
+    values: Record<string, any>;
+    columns?: string[];
+    returning?: Array<string> | string;
+};
+
+export async function insertInto<
+    Returning extends Record<string, any>,
+>(
+    tableName: string,
+    query: InsertQuery,
+    client: Client,
+): Promise<Returning[]> {
+    const { keys, values: valuesToInsert } = entries(query.values);
+
+    const columnParameterList = valuesToInsert.map((_k, index) =>
+        `$${index + 1}`
+    );
+    const rows = await client.queryObject<Returning>({
+        text: `
+          INSERT INTO ${tableName}
+            (${keys.join(",")})
+            VALUES (${columnParameterList.join(",")})
+            ${
+            query.returning
+                ? `RETURNING ${
+                    Array.isArray(query.returning)
+                        ? query.returning.join(",")
+                        : query.returning
+                }`
+                : ""
+        }
+        `,
+        args: valuesToInsert,
+    }).then((result) => result.rows);
+    return rows;
+}

@@ -86,14 +86,14 @@ describe("Unextended Model class", () => {
     },
   } as const;
 
-  let User = defineModel("User", modelDefinition);
+  let User = defineModel("User", modelDefinition, db!);
 
   beforeEach(() => {
-    User = defineModel("User", modelDefinition, db);
+    User = defineModel("User", modelDefinition, db) as any;
   });
 
   describe("static methods", () => {
-    describe("static build()", () => {
+    describe("Model.build()", () => {
       it("stores the dataValues", () => {
         const userData = { first_name: "Foo", last_name: "Bar", id: 1 };
         const user = User.build(userData);
@@ -125,7 +125,7 @@ describe("Unextended Model class", () => {
       });
     });
 
-    describe("static create()", () => {
+    describe("Model.create()", () => {
       it("directly creates a persisted instance", async () => {
         const user = await User.create({
           first_name: "Foo",
@@ -136,7 +136,32 @@ describe("Unextended Model class", () => {
       });
     });
 
-    describe("static find()", () => {
+    describe("Model.insert()", () => {
+      it("returns a model instance", async () => {
+        const user = await User.insert({
+          values: { first_name: "_", last_name: "_" },
+        });
+        expect(user).toBeInstanceOf(User);
+      });
+
+      it("saves the values passed", async () => {
+        const user = await User.insert({
+          values: { first_name: "correct", last_name: "values" },
+        });
+        expect(user.first_name).toBe('correct');
+        expect(user.last_name).toBe('values');
+      });
+
+      it("returns a persisted instance with primaryKey", async () => {
+        const user = await User.insert({
+          values: { first_name: "correct", last_name: "values" },
+        });
+        expect(user.primaryKey).not.toBeNull()
+        expect(user.persisted).toBeTruthy()
+      });
+    });
+
+    describe("Model.find()", () => {
       let user = new User();
       const userData = { first_name: "Find", last_name: "Method" };
 
@@ -322,8 +347,7 @@ describe("Unextended Model class", () => {
         });
       });
 
-
-      it("calls static update()", async () => {
+      it("calls Model.update()", async () => {
         using updateSpy = stub(User, "update");
         const user = await User.create({ first_name: "_", last_name: "" });
         user.update({
