@@ -2,6 +2,8 @@
 
 import { Client } from "https://deno.land/x/postgres@v0.19.3/mod.ts";
 import {
+  insertInto,
+  type InsertQuery,
   select,
   type SelectQuery,
   update,
@@ -259,30 +261,6 @@ export function defineModel<
       query: UpdateQuery<Partial<Schema>>,
     ): Promise<any> {
       return update(this.tableName, query, client!);
-      /* const argOffset = 2;
-
-      const updateEntries = entries(data);
-      const updatedFields = createWhereClause(
-        updateEntries.keys,
-        argOffset,
-        ",",
-        "=",
-      );
-      const args = [primaryKey].concat(
-        updateEntries.values,
-      );
-
-      const [row] = await client!.queryObject<WithId>({
-        text: `
-          UPDATE ${this.tableName}
-          SET ${updatedFields}
-          WHERE ${this.tableName}.${this.primaryKeyColumn} = $1
-          RETURNING ${this.primaryKeyColumn}
-          `,
-        args,
-      }).then((result) => result.rows);
-
-      return row.id; */
     }
 
     static async delete(primaryKey: Pk): Promise<Pk> {
@@ -305,33 +283,32 @@ export function defineModel<
       return result[this.primaryKeyColumn as any];
     }
 
+    static insert<ConcreteModel extends typeof Model>(
+      this: ConcreteModel,
+      query: {
+        values:
+          & Omit<Schema, keyof PrimaryKey>
+          & Partial<PrimaryKey>;
+      },
+    ): Promise<InstanceType<ConcreteModel>> {
+      return new this().set(query.values).save() as any
+    }
+
     /** Public instance methods */
 
     async save(): Promise<this> {
-      const { id: _id, ...values } = this.#dataValues;
-      const entries = Object.entries(values);
-      const columnNames = entries.map((entry) => entry.at(0));
-      const columnValues = entries.map((entry) => entry.at(1));
-      const columnParameterList = columnValues.map((_k, index) =>
-        `$${index + 1}`
-      );
+      if (!Model.primaryKeyColumn) {
+        throw new Error("Model doesnt have a known pk");
+      }
 
-      const [row] = await client!.queryObject<WithId>({
-        text: `
-          INSERT INTO ${Model.tableName}
-            (${columnNames.join(",")})
-            VALUES (${columnParameterList.join(",")})
-          RETURNING id
-        `,
-        args: columnValues,
-      }).then((result) => result.rows);
+      const [result] = await insertInto<PrimaryKey>(Model.tableName, {
+        values: this.#dataValues,
+        returning: Model.primaryKeyColumn,
+      }, client!);
 
+      this.set(result);
       this.#persisted = true;
-      Object.defineProperty(this.#dataValues, "id", {
-        value: row.id,
-        enumerable: true,
-      });
-      return this as any;
+      return this;
     }
 
     async reload(): Promise<this> {
@@ -345,7 +322,7 @@ export function defineModel<
       data: Partial<Schema>,
     ): Promise<this> {
       assertPersisted(this, Model);
-      this.set(data)
+      this.set(data);
       await Model.update({
         set: data,
         where: { [this.primaryKeyProperty as any]: this.primaryKey },
