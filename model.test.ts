@@ -125,17 +125,6 @@ describe("Unextended Model class", () => {
       });
     });
 
-    describe("Model.create()", () => {
-      it("directly creates a persisted instance", async () => {
-        const user = await User.create({
-          first_name: "Foo",
-          last_name: "Bar",
-        });
-        expect(user.persisted).toBeTruthy();
-        expect(user.primaryKey).toBeDefined();
-      });
-    });
-
     describe("Model.insert()", () => {
       it("returns a model instance", async () => {
         const user = await User.insert({
@@ -144,20 +133,20 @@ describe("Unextended Model class", () => {
         expect(user).toBeInstanceOf(User);
       });
 
-      it("saves the values passed", async () => {
+      it("stores the values passed", async () => {
         const user = await User.insert({
           values: { first_name: "correct", last_name: "values" },
         });
-        expect(user.first_name).toBe('correct');
-        expect(user.last_name).toBe('values');
+        expect(user.first_name).toBe("correct");
+        expect(user.last_name).toBe("values");
       });
 
       it("returns a persisted instance with primaryKey", async () => {
         const user = await User.insert({
           values: { first_name: "correct", last_name: "values" },
         });
-        expect(user.primaryKey).not.toBeNull()
-        expect(user.persisted).toBeTruthy()
+        expect(user.primaryKey).not.toBeNull();
+        expect(user.persisted).toBeTruthy();
       });
     });
 
@@ -166,7 +155,7 @@ describe("Unextended Model class", () => {
       const userData = { first_name: "Find", last_name: "Method" };
 
       beforeEach(async () => {
-        user = await User.create(userData);
+        user = await User.insert({ values: userData });
       });
 
       it("Returns a persisted instance of the model", async () => {
@@ -218,7 +207,7 @@ describe("Unextended Model class", () => {
       };
 
       beforeEach(async () => {
-        user = await User.create(initialValues);
+        user = await User.insert({ values: initialValues });
       });
 
       it("Updates values on db", async () => {
@@ -242,13 +231,17 @@ describe("Unextended Model class", () => {
 
     describe("Model.delete()", () => {
       it("removes the row from db", async () => {
-        const user = await User.create({ first_name: "_", last_name: "" });
+        const user = await User.insert({
+          values: { first_name: "_", last_name: "_" },
+        });
         await User.delete(user.id);
         expect(User.find(user.id)).rejects.toThrow("does not exist");
       });
 
       it("returns the id of deleted row", async () => {
-        const user = await User.create({ first_name: "_", last_name: "" });
+        const user = await User.insert({
+          values: { first_name: "_", last_name: "_" },
+        });
         const result = await User.delete(user.id);
         expect(result).toBe(user.id);
       });
@@ -328,7 +321,9 @@ describe("Unextended Model class", () => {
       });
 
       it("calls set() with the new values", async () => {
-        const user = await User.create({ first_name: "Foo", last_name: "Bar" });
+        const user = await User.insert({
+          values: { first_name: "Foo", last_name: "Bar" },
+        });
         const setStub = stub(user, "set");
         await user.update({ first_name: "New" });
         assertSpyCalls(setStub, 1);
@@ -338,7 +333,9 @@ describe("Unextended Model class", () => {
       });
 
       it("calls Model.update() with the new values", async () => {
-        const user = await User.create({ first_name: "Foo", last_name: "Bar" });
+        const user = await User.insert({
+          values: { first_name: "Foo", last_name: "Bar" },
+        });
         const ModelUpdate = stub(User, "update");
         await user.update({ first_name: "New" });
         assertSpyCalls(ModelUpdate, 1);
@@ -349,7 +346,9 @@ describe("Unextended Model class", () => {
 
       it("calls Model.update()", async () => {
         using updateSpy = stub(User, "update");
-        const user = await User.create({ first_name: "_", last_name: "" });
+        const user = await User.insert({
+          values: { first_name: "_", last_name: "_" },
+        });
         user.update({
           first_name: "stubbed",
         });

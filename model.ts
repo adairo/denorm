@@ -162,12 +162,12 @@ export function defineModel<
     static primaryKeyColumn = getPrimaryKeyColumn(this.modelDefinition.columns);
 
     constructor() {
-      const allColumns = Object.keys(Model.modelDefinition.columns);
+      const modelColumns = Model.columns();
 
       this.#primaryKeyColumn = getPrimaryKeyColumn(
         Model.modelDefinition.columns,
       );
-      this.#dataValues = allColumns.reduce((object, column) => {
+      this.#dataValues = modelColumns.reduce((object, column) => {
         Object.defineProperty(object, column, {
           value: null,
           enumerable: true,
@@ -176,7 +176,7 @@ export function defineModel<
         return object;
       }, Object.create(null));
 
-      allColumns.forEach((column) =>
+      modelColumns.forEach((column) =>
         Object.defineProperty(this, column, {
           get() {
             return this.dataValues[column];
@@ -213,15 +213,6 @@ export function defineModel<
       return new this().set(
         values,
       ) as any;
-    }
-
-    static create<ConcreteModel extends typeof Model>(
-      this: ConcreteModel,
-      values:
-        & Omit<Schema, keyof PrimaryKey>
-        & Partial<PrimaryKey>,
-    ): Promise<InstanceType<ConcreteModel>> {
-      return this.build(values).save();
     }
 
     static async find<ConcreteModel extends typeof Model>(
@@ -291,7 +282,7 @@ export function defineModel<
           & Partial<PrimaryKey>;
       },
     ): Promise<InstanceType<ConcreteModel>> {
-      return new this().set(query.values).save() as any
+      return this.build(query.values).save() as any;
     }
 
     /** Public instance methods */
@@ -301,8 +292,11 @@ export function defineModel<
         throw new Error("Model doesnt have a known pk");
       }
 
+      const payload = Object.entries(this.#dataValues).filter(([_col, value]) =>
+        value !== null
+      );
       const [result] = await insertInto<PrimaryKey>(Model.tableName, {
-        values: this.#dataValues,
+        values: Object.fromEntries(payload),
         returning: Model.primaryKeyColumn,
       }, client!);
 
