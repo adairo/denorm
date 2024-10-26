@@ -120,8 +120,9 @@ export default class Orm {
         return this.#dataValues[key] as any;
       }
 
-      setDataValue<K extends keyof Schema>(key: K, value: Schema[K]): void {
+      setDataValue<K extends keyof Schema>(key: K, value: Schema[K]): this {
         this.#dataValues[key] = value;
+        return this;
       }
 
       get primaryKey(): Pk | null {
@@ -224,24 +225,16 @@ export default class Orm {
         if (primaryKey === null || typeof primaryKey === "undefined") {
           throw new Error(`${primaryKey} is not a valid identifier`);
         }
-        const primaryKeyColumn = getPrimaryKeyColumn(
-          this.modelDefinition.columns,
-        );
-        if (!primaryKeyColumn) {
-          throw new Error(
-            `${this.modelName} model doesn't have a known primary key`,
-          );
-        }
         const result = await this.select(columnsOrValues, {
           where: {
-            [primaryKeyColumn]: primaryKey,
+            [Model.primaryKeyColumn]: primaryKey,
           } as unknown as Schema,
           limit: 1,
         });
         const modelInstance = result[0];
         if (!modelInstance) {
           throw new Error(
-            `${this.modelName} with ${primaryKeyColumn}=${primaryKey} does not exist`,
+            `${this.modelName} with ${Model.primaryKeyColumn}=${primaryKey} does not exist`,
           );
         }
         return modelInstance;
@@ -276,29 +269,35 @@ export default class Orm {
       /** Public instance methods */
 
       async save(): Promise<this> {
+        if (this.persisted) {
+          return this.update(this.dataValues);
+        }
+
         const allowedKeys = new Set(Model.columns()).intersection(
-          new Set(Object.keys(this.#dataValues)),
+          new Set(Object.keys(this.dataValues)),
         );
 
         const payload = allowedKeys.keys().reduce<Record<string, any>>(
           (object, column) => {
-            const value = this.#dataValues[column];
             if (column === Model.primaryKeyColumn) {
               return object;
             }
-
+            
+            const value = this.getDataValue(column);
             object[column] = value;
             return object;
           },
           Object.create(null),
         );
+
         const [result] = await insertInto<PrimaryKey>(Model.tableName, {
           values: payload,
           returning: Model.primaryKeyColumn,
         }, client);
 
-        this.set(result);
+        this.set(result); // set primaryKey
         this.#persisted = true;
+
         return this;
       }
 

@@ -326,16 +326,25 @@ describe("Unextended Model class", () => {
           expect(user.primaryKey).not.toBeNull();
           expect(user.persisted).toBeTruthy();
         });
+
+        it("can be retrived from db", async () => {
+          const user = await User.build({ first_name: "_" }).save();
+
+          const [retrieved] = await User.select(["id", "first_name"], {
+            where: { id: user.id },
+          });
+          expect(retrieved.primaryKey).toBeDefined();
+          expect(retrieved.first_name).toBe("_");
+        });
       });
 
-      it("can be retrived from db", async () => {
-        const user = await User.build({ first_name: "_" }).save();
-
-        const [retrieved] = await User.select(["id", "first_name"], {
-          where: { id: user.id },
+      describe("when the instance is already persisted", () => {
+        it("saves the new values on db", async () => {
+          const user = await User.create({ first_name: "_", last_name: "_" });
+          await user.setDataValue("first_name", "foo").save();
+          const retrieved = await User.find(user.id);
+          expect(retrieved.first_name).toBe("foo");
         });
-        expect(retrieved.primaryKey).toBeDefined();
-        expect(retrieved.first_name).toBe("_");
       });
     });
 
