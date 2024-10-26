@@ -114,9 +114,9 @@ describe("Unextended Model class", () => {
       });
     });
 
-    describe("Model.insert()", () => {
+    describe("Model.create()", () => {
       it("returns a model instance", async () => {
-        const user = await User.insert({
+        const user = await User.create({
           first_name: "_",
           last_name: "_",
         });
@@ -124,40 +124,12 @@ describe("Unextended Model class", () => {
       });
 
       it("stores the values passed", async () => {
-        const user = await User.insert({
+        const user = await User.create({
           first_name: "correct",
           last_name: "values",
         });
         expect(user.first_name).toBe("correct");
         expect(user.last_name).toBe("values");
-      });
-
-      it("returns a persisted instance with primaryKey", async () => {
-        const user = await User.insert({
-          first_name: "correct",
-          last_name: "values",
-        });
-        expect(user.primaryKey).not.toBeNull();
-        expect(user.persisted).toBeTruthy();
-      });
-
-      it("can be retrived from db", async () => {
-        const user = await User.insert({
-          first_name: "_",
-          last_name: "_",
-        });
-
-        const { rows: [result] } = await orm.client.queryObject<
-          { rowFound: true } | null
-        >(
-          `
-          SELECT true "rowFound"
-          FROM users
-          WHERE id = $1
-        `,
-          [user.id],
-        );
-        expect(result?.rowFound).toBeTruthy();
       });
     });
 
@@ -166,7 +138,7 @@ describe("Unextended Model class", () => {
       const userData = { first_name: "Find", last_name: "Method" };
 
       beforeEach(async () => {
-        user = await User.insert(userData);
+        user = await User.create(userData);
       });
 
       it("Returns a persisted instance of the model", async () => {
@@ -208,7 +180,7 @@ describe("Unextended Model class", () => {
       };
 
       beforeEach(async () => {
-        user = await User.insert(initialValues);
+        user = await User.create(initialValues);
       });
 
       it("Updates values on db", async () => {
@@ -232,13 +204,13 @@ describe("Unextended Model class", () => {
 
     describe("Model.delete()", () => {
       it("removes the row from db", async () => {
-        const user = await User.insert({ first_name: "_", last_name: "" });
+        const user = await User.create({ first_name: "_", last_name: "" });
         await User.delete({ where: { id: user.id } });
         expect(User.find(user.id)).rejects.toThrow("does not exist");
       });
 
       it("can return the id of deleted row", async () => {
-        const user = await User.insert({ first_name: "_", last_name: "" });
+        const user = await User.create({ first_name: "_", last_name: "" });
         const [result] = await User.delete({
           where: { id: user.id },
           returning: "id",
@@ -300,7 +272,7 @@ describe("Unextended Model class", () => {
       });
 
       it("calls set() with the new values", async () => {
-        const user = await User.insert({ first_name: "Foo", last_name: "Bar" });
+        const user = await User.create({ first_name: "Foo", last_name: "Bar" });
 
         using setStub = stub(user, "set");
         await user.update({ first_name: "New" });
@@ -311,7 +283,7 @@ describe("Unextended Model class", () => {
       });
 
       it("calls Model.update() with the new values", async () => {
-        const user = await User.insert({ first_name: "Foo", last_name: "Bar" });
+        const user = await User.create({ first_name: "Foo", last_name: "Bar" });
         using ModelUpdate = stub(User, "update");
         await user.update({ first_name: "New" });
         assertSpyCalls(ModelUpdate, 1);
@@ -322,7 +294,7 @@ describe("Unextended Model class", () => {
 
       it("calls Model.update()", async () => {
         using updateSpy = stub(User, "update");
-        const user = await User.insert({ first_name: "_", last_name: "" });
+        const user = await User.create({ first_name: "_", last_name: "" });
         user.update({
           first_name: "stubbed",
         });
@@ -344,9 +316,28 @@ describe("Unextended Model class", () => {
       });
     });
 
-    describe('Model.prototype.save()', () => {
-      
-    })
+    describe("Model.prototype.save()", () => {
+      describe("when the instance is not persisted yet", () => {
+        it("sets the primaryKey and set instance as persisted", async () => {
+          const user = User.build({ first_name: "_" });
+          expect(user.primaryKey).toBeNull();
+          expect(user.persisted).toBeFalsy();
+          await user.save();
+          expect(user.primaryKey).not.toBeNull();
+          expect(user.persisted).toBeTruthy();
+        });
+      });
+
+      it("can be retrived from db", async () => {
+        const user = await User.build({ first_name: "_" }).save();
+
+        const [retrieved] = await User.select(["id", "first_name"], {
+          where: { id: user.id },
+        });
+        expect(retrieved.primaryKey).toBeDefined();
+        expect(retrieved.first_name).toBe("_");
+      });
+    });
 
     describe("Model.prototype.delete()", () => {
     });

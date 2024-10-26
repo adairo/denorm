@@ -11,12 +11,12 @@ function getReturningClause(returning: string[] | string | undefined): string {
     return "RETURNING " + selected.join(",");
 }
 
-export type SelectQuery = {
-    where?: WhereClause;
+export type SelectQuery<Columns extends WhereClause = WhereClause> = {
+    where?: Partial<Columns>;
     from: string;
     orderBy?: Array<
         [
-            string,
+            keyof Columns,
             "ASC" | "DESC",
         ]
     >;
@@ -161,8 +161,10 @@ export async function insertInto<
     const rows = await client.queryObject<Returning>({
         text: `
           INSERT INTO ${tableName}
-            (${keys.join(",")})
-            VALUES (${columnParameterList.join(",")})
+            ${keys.length > 0 ? `(${keys.join(",")})` : ""} 
+            ${
+            keys.length > 0 ? `VALUES (${columnParameterList.join(",")})` : ""
+        }
             ${
             query.returning
                 ? `RETURNING ${

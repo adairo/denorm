@@ -113,8 +113,11 @@ export default class Orm {
       #persisted: boolean = false;
 
       /** Getters and setters */
-      getDataValue<K extends keyof Schema>(key: K): Schema[K] {
-        return this.#dataValues[key];
+      // deno-lint-ignore ban-types
+      getDataValue<K extends keyof Schema | (string & {})>(
+        key: K,
+      ): K extends keyof Schema ? Schema[K] : unknown {
+        return this.#dataValues[key] as any;
       }
 
       setDataValue<K extends keyof Schema>(key: K, value: Schema[K]): void {
@@ -188,7 +191,7 @@ export default class Orm {
 
       static async select<ConcreteModel extends typeof Model>(
         this: ConcreteModel,
-        columnsOrValues: Array<keyof Schema>,
+        columnsOrValues: Array<keyof Schema> | string[],
         queryOptions: Omit<SelectQuery<Schema>, "from">,
       ): Promise<Array<InstanceType<ConcreteModel>>> {
         const result = await select<Schema>(columnsOrValues, {
@@ -261,7 +264,7 @@ export default class Orm {
         return result;
       }
 
-      static insert<ConcreteModel extends typeof Model>(
+      static create<ConcreteModel extends typeof Model>(
         this: ConcreteModel,
         values:
           & Omit<Schema, keyof PrimaryKey>
@@ -280,7 +283,7 @@ export default class Orm {
         const payload = allowedKeys.keys().reduce<Record<string, any>>(
           (object, column) => {
             const value = this.#dataValues[column];
-            if (value === null) {
+            if (column === Model.primaryKeyColumn) {
               return object;
             }
 
