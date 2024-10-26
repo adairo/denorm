@@ -51,7 +51,6 @@ describe("Unextended Model class", () => {
   const orm = new Orm();
 
   beforeAll(async () => {
-    await orm.client.connect();
     await orm.client.queryObject(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
@@ -265,8 +264,22 @@ describe("Unextended Model class", () => {
       userInstance = User.build(userData);
     });
 
-    describe("can update the properties of the instance", () => {
-      userInstance.last_name = "Updated";
+    describe("using setters to set properties", () => {
+      it("mutates the instance", () => {
+        userInstance.last_name = "Updated";
+        expect(userInstance.last_name).toBe("Updated");
+      });
+
+      it("does not mutate db values", async () => {
+        await userInstance.save();
+        userInstance.last_name = "Updated";
+        const [retrieved] = await User.select(["last_name"], {
+          where: {
+            id: userInstance.id,
+          },
+        });
+        expect(retrieved.last_name).not.toBe("Updated");
+      });
     });
 
     describe("Model.prototype.set()", () => {
@@ -275,12 +288,6 @@ describe("Unextended Model class", () => {
         userInstance.set(updatedData);
         const { first_name, id } = userInstance;
         expect({ first_name, id }).toEqual(updatedData);
-      });
-
-      it("ignores columns not present on model definition", () => {
-        userInstance.set({ first_name: "Defined", age: 2 } as any);
-        expect((userInstance as any).age).toBeUndefined();
-        expect((userInstance.dataValues as any).age).toBeUndefined();
       });
     });
 
@@ -336,6 +343,10 @@ describe("Unextended Model class", () => {
         expect(updated).toStrictEqual(userInstance);
       });
     });
+
+    describe('Model.prototype.save()', () => {
+      
+    })
 
     describe("Model.prototype.delete()", () => {
     });

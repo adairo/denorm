@@ -91,8 +91,8 @@ export default class Orm {
     this.#client = new Client(config);
   }
 
-  get client(){
-    return this.#client
+  get client() {
+    return this.#client;
   }
 
   public defineModel<
@@ -138,13 +138,9 @@ export default class Orm {
       }
 
       public set(dataValues: Partial<Schema>) {
-        const modelColumns = Model.columns();
-        this.#dataValues = Object.keys(dataValues).reduce((values, column) => {
-          if (modelColumns.includes(column)) {
-            (values[column] as any) = dataValues[column];
-          }
-          return values;
-        }, { ...this.#dataValues });
+        Object.entries(dataValues).forEach(([key, value]) =>
+          this.setDataValue(key, value)
+        );
         return this;
       }
 
@@ -167,6 +163,7 @@ export default class Orm {
         this.#dataValues = modelColumns.reduce((object, column) => {
           Object.defineProperty(object, column, {
             value: null,
+            writable: true,
             enumerable: true,
           });
           return object;
@@ -192,7 +189,7 @@ export default class Orm {
       static async select<ConcreteModel extends typeof Model>(
         this: ConcreteModel,
         columnsOrValues: Array<keyof Schema>,
-        queryOptions: Omit<SelectQuery, "from">,
+        queryOptions: Omit<SelectQuery<Schema>, "from">,
       ): Promise<Array<InstanceType<ConcreteModel>>> {
         const result = await select<Schema>(columnsOrValues, {
           ...queryOptions,
@@ -276,11 +273,24 @@ export default class Orm {
       /** Public instance methods */
 
       async save(): Promise<this> {
-        const payload = Object.entries(this.#dataValues).filter((
-          [_col, value],
-        ) => value !== null);
+        const allowedKeys = new Set(Model.columns()).intersection(
+          new Set(Object.keys(this.#dataValues)),
+        );
+
+        const payload = allowedKeys.keys().reduce<Record<string, any>>(
+          (object, column) => {
+            const value = this.#dataValues[column];
+            if (value === null) {
+              return object;
+            }
+
+            object[column] = value;
+            return object;
+          },
+          Object.create(null),
+        );
         const [result] = await insertInto<PrimaryKey>(Model.tableName, {
-          values: Object.fromEntries(payload),
+          values: payload,
           returning: Model.primaryKeyColumn,
         }, client);
 
