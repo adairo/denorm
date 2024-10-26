@@ -28,13 +28,13 @@ describe({
       orm.defineModel("_", {
         tableName: "_",
         columns: { id: "integer" },
-      }).build()
+      })
     ).toThrow();
   });
 });
 
 describe("Extended Model class", () => {
-  const orm = new Orm()
+  const orm = new Orm();
   class Extended extends orm.defineModel("Original", {
     columns: { id: { type: "text", primaryKey: true } },
     tableName: "_",
@@ -73,19 +73,13 @@ describe("Unextended Model class", () => {
     await orm.client.end();
   });
 
-  const modelDefinition = {
+  const User = orm.defineModel("User", {
     tableName: "users",
     columns: {
       id: { type: "integer", primaryKey: true },
       first_name: "text",
       last_name: "text",
     },
-  } as const;
-
-  let User = orm.defineModel("User", modelDefinition);
-
-  beforeEach(() => {
-    User = orm.defineModel("User", modelDefinition) as any;
   });
 
   describe("static methods", () => {
@@ -271,6 +265,10 @@ describe("Unextended Model class", () => {
       userInstance = User.build(userData);
     });
 
+    describe("can update the properties of the instance", () => {
+      userInstance.last_name = "Updated";
+    });
+
     describe("Model.prototype.set()", () => {
       it("stores multiple values passed", () => {
         const updatedData = { first_name: "Changed", id: 10 };
@@ -296,7 +294,8 @@ describe("Unextended Model class", () => {
 
       it("calls set() with the new values", async () => {
         const user = await User.insert({ first_name: "Foo", last_name: "Bar" });
-        const setStub = stub(user, "set");
+
+        using setStub = stub(user, "set");
         await user.update({ first_name: "New" });
         assertSpyCalls(setStub, 1);
         assertSpyCall(setStub, 0, {
@@ -306,7 +305,7 @@ describe("Unextended Model class", () => {
 
       it("calls Model.update() with the new values", async () => {
         const user = await User.insert({ first_name: "Foo", last_name: "Bar" });
-        const ModelUpdate = stub(User, "update");
+        using ModelUpdate = stub(User, "update");
         await user.update({ first_name: "New" });
         assertSpyCalls(ModelUpdate, 1);
         assertSpyCall(ModelUpdate, 0, {
