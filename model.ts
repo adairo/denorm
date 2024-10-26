@@ -11,6 +11,7 @@ import {
   update,
   type UpdateQuery,
 } from "./queries.ts";
+import type { ClientConfiguration } from "https://deno.land/x/postgres@v0.19.3/connection/connection_params.ts";
 
 let client: Client | undefined;
 
@@ -46,21 +47,6 @@ function getPrimaryKeyColumn(columns: ModelColumns): string | null {
   return primaryKey;
 }
 
-type WithId = { id: number };
-type UnknownPersistedModel = {
-  primaryKey: string | number | null;
-  persisted: boolean;
-};
-type OmitPersistence<Model extends { primaryKey: any; persisted: any }> = Omit<
-  Model,
-  "id" | "persisted"
->;
-type PersistedModel = {
-  primaryKey: string | number;
-  persisted: true;
-};
-type NonPersistedModel = { id: null; persisted: false };
-
 type ModelStatic = {
   tableName: string;
   modelName: string;
@@ -85,7 +71,6 @@ type ColumnDefinition = {
   type: ColumnType;
   notNull?: boolean;
   primaryKey?: boolean;
-  references?: ModelStatic;
 };
 
 type GetPrimaryKey<Columns extends ModelDefinition["columns"]> = {
@@ -100,232 +85,248 @@ type GetPrimaryKey<Columns extends ModelDefinition["columns"]> = {
 type ValuesOf<Object extends Record<any, any>> = Object extends
   { [key: PropertyKey]: infer T } ? T : never;
 
-export function defineModel<
-  Definition extends ModelDefinition,
-  Schema extends Record<string, any> = ModelSchema<Definition>,
-  PrimaryKey extends Record<any, any> = GetPrimaryKey<Definition["columns"]>,
-  Pk = ValuesOf<PrimaryKey>,
->(
-  modelName: string,
-  modelDefinition: Definition,
-  _client?: Client,
-) {
-  client = _client;
-  class Model {
-    static modelName: string = modelName;
-    static tableName: string = modelDefinition.tableName;
-    static modelDefinition: Definition = modelDefinition;
-    #dataValues: Schema;
-    #primaryKeyColumn: string | null = null;
-    #persisted: boolean = false;
-
-    /** Getters and setters */
-
-    get primaryKey(): Pk | null {
-      return this.dataValues[Model.primaryKeyColumn];
-    }
-
-    get persisted(): boolean {
-      return this.#persisted;
-    }
-
-    private set persisted(persisted: boolean) {
-      this.#persisted = persisted;
-    }
-
-    get dataValues() {
-      return this.#dataValues;
-    }
-
-    public set(dataValues: Partial<Schema>) {
-      const modelColumns = Model.columns();
-      this.#dataValues = Object.keys(dataValues).reduce((values, column) => {
-        if (modelColumns.includes(column)) {
-          (values[column] as any) = dataValues[column];
-        }
-        return values;
-      }, { ...this.#dataValues });
-      return this;
-    }
-
-    /** Static members */
-
-    static primaryKeyColumn: string;
-
-    static {
-      const pkColumn = getPrimaryKeyColumn(this.modelDefinition.columns);
-      if (!pkColumn) {
-        throw new Error("It is mandatory for a model to define a primary key");
-      }
-      this.primaryKeyColumn = pkColumn;
-    }
-
-    constructor() {
-      const modelColumns = Model.columns();
-
-      this.#primaryKeyColumn = getPrimaryKeyColumn(
-        Model.modelDefinition.columns,
-      );
-      this.#dataValues = modelColumns.reduce((object, column) => {
-        Object.defineProperty(object, column, {
-          value: null,
-          enumerable: true,
-          writable: false,
-        });
-        return object;
-      }, Object.create(null));
-
-      modelColumns.forEach((column) =>
-        Object.defineProperty(this, column, {
-          get() {
-            return this.dataValues[column];
-          },
-          enumerable: true,
-        })
-      );
-    }
-
-    static columns() {
-      return Object.keys(this.modelDefinition.columns);
-    }
-
-    static async select<ConcreteModel extends typeof Model>(
-      this: ConcreteModel,
-      columnsOrValues: Array<keyof Schema>,
-      queryOptions: Omit<SelectQuery, "from">,
-    ): Promise<Array<InstanceType<ConcreteModel>>> {
-      const result = await select<Schema>(columnsOrValues, {
-        ...queryOptions,
-        from: this.tableName,
-      }, client!);
-      return result.rows.map((row) => {
-        const instance = new this().set(row);
-        instance.persisted = true;
-        return instance as InstanceType<ConcreteModel>;
-      });
-    }
-
-    static build<ConcreteModel extends typeof Model>(
-      this: ConcreteModel,
-      values: Partial<Schema> = {},
-    ): InstanceType<ConcreteModel> {
-      return new this().set(
-        values,
-      ) as any;
-    }
-
-    static async find<ConcreteModel extends typeof Model>(
-      this: ConcreteModel,
-      primaryKey: Pk,
-      columnsOrValues: Array<keyof Schema> = Object.keys(
-        this.modelDefinition.columns,
-      ),
-    ): Promise<InstanceType<ConcreteModel>> {
-      if (primaryKey === null || typeof primaryKey === "undefined") {
-        throw new Error(`${primaryKey} is not a valid identifier`);
-      }
-      const primaryKeyColumn = getPrimaryKeyColumn(
-        this.modelDefinition.columns,
-      );
-      if (!primaryKeyColumn) {
-        throw new Error(
-          `${this.modelName} model doesn't have a known primary key`,
-        );
-      }
-      const result = await this.select(columnsOrValues, {
-        where: {
-          [primaryKeyColumn]: primaryKey,
-        } as unknown as Schema,
-        limit: 1,
-      });
-      const modelInstance = result[0];
-      if (!modelInstance) {
-        throw new Error(
-          `${this.modelName} with ${primaryKeyColumn}=${primaryKey} does not exist`,
-        );
-      }
-      return modelInstance;
-    }
-
-    static update(
-      query: UpdateQuery<Partial<Schema>>,
-    ): Promise<any> {
-      return update(this.tableName, query, client!);
-    }
-
-    static async delete<Returning extends Record<PropertyKey, any>>(
-      query: Omit<DeleteQuery, "from">,
-    ): Promise<Returning[]> {
-      const result = await deleteQuery<Returning>(
-        { ...query, from: this.tableName },
-        client!,
-      );
-
-      return result;
-    }
-
-    static insert<ConcreteModel extends typeof Model>(
-      this: ConcreteModel,
-      values:
-        & Omit<Schema, keyof PrimaryKey>
-        & Partial<PrimaryKey>,
-    ): Promise<InstanceType<ConcreteModel>> {
-      return this.build(values).save() as any;
-    }
-
-    /** Public instance methods */
-
-    async save(): Promise<this> {
-      const payload = Object.entries(this.#dataValues).filter(([_col, value]) =>
-        value !== null
-      );
-      const [result] = await insertInto<PrimaryKey>(Model.tableName, {
-        values: Object.fromEntries(payload),
-        returning: Model.primaryKeyColumn,
-      }, client!);
-
-      this.set(result);
-      this.#persisted = true;
-      return this;
-    }
-
-    async reload(): Promise<this> {
-      assertPersisted(this, Model);
-      const clone = await Model.find(this.primaryKey!);
-      this.set(clone.dataValues);
-      return this;
-    }
-
-    async update(
-      data: Partial<Schema>,
-    ): Promise<this> {
-      assertPersisted(this, Model);
-      this.set(data);
-      await Model.update({
-        set: data,
-        where: { [Model.primaryKeyColumn]: this.primaryKey },
-      });
-      return this;
-    }
-
-    async delete(): Promise<this> {
-      assertPersisted(this, Model);
-      await Model.delete({
-        where: { [Model.primaryKeyColumn]: this.primaryKey },
-      });
-      this.#persisted = false;
-      this.set({ id: null } as any);
-      return this as any;
-    }
-
-    toJSON() {
-      return JSON.stringify(this.#dataValues);
-    }
+export default class Orm {
+  #client: Client;
+  constructor(config?: ClientConfiguration) {
+    this.#client = new Client(config);
   }
-  return Model as
-    & typeof Model
-    & ModelStatic
-    & Constructor<Schema>;
+
+  get client(){
+    return this.#client
+  }
+
+  public defineModel<
+    Definition extends ModelDefinition,
+    Schema extends Record<string, any> = ModelSchema<Definition>,
+    PrimaryKey extends Record<any, any> = GetPrimaryKey<Definition["columns"]>,
+    Pk = ValuesOf<PrimaryKey>,
+  >(
+    modelName: string,
+    modelDefinition: Definition,
+  ) {
+    const client = this.#client;
+    class Model {
+      static modelName: string = modelName;
+      static tableName: string = modelDefinition.tableName;
+      static modelDefinition: Definition = modelDefinition;
+      #dataValues: Schema;
+      #persisted: boolean = false;
+
+      /** Getters and setters */
+      getDataValue<K extends keyof Schema>(key: K): Schema[K] {
+        return this.#dataValues[key];
+      }
+
+      setDataValue<K extends keyof Schema>(key: K, value: Schema[K]): void {
+        this.#dataValues[key] = value;
+      }
+
+      get primaryKey(): Pk | null {
+        return this.dataValues[Model.primaryKeyColumn];
+      }
+
+      get persisted(): boolean {
+        return this.#persisted;
+      }
+
+      private set persisted(persisted: boolean) {
+        this.#persisted = persisted;
+      }
+
+      get dataValues() {
+        return this.#dataValues;
+      }
+
+      public set(dataValues: Partial<Schema>) {
+        const modelColumns = Model.columns();
+        this.#dataValues = Object.keys(dataValues).reduce((values, column) => {
+          if (modelColumns.includes(column)) {
+            (values[column] as any) = dataValues[column];
+          }
+          return values;
+        }, { ...this.#dataValues });
+        return this;
+      }
+
+      /** Static members */
+
+      static primaryKeyColumn: string;
+
+      static {
+        const pkColumn = getPrimaryKeyColumn(this.modelDefinition.columns);
+        if (!pkColumn) {
+          throw new Error(
+            "It is mandatory for a model to define a primary key",
+          );
+        }
+        this.primaryKeyColumn = pkColumn;
+      }
+
+      constructor() {
+        const modelColumns = Model.columns();
+        this.#dataValues = modelColumns.reduce((object, column) => {
+          Object.defineProperty(object, column, {
+            value: null,
+            enumerable: true,
+          });
+          return object;
+        }, Object.create(null));
+
+        modelColumns.forEach((column) =>
+          Object.defineProperty(this, column, {
+            get(this: Model) {
+              return this.getDataValue(column);
+            },
+            set(this: Model, value: any) {
+              this.setDataValue(column, value);
+            },
+            enumerable: true,
+          })
+        );
+      }
+
+      static columns() {
+        return Object.keys(this.modelDefinition.columns);
+      }
+
+      static async select<ConcreteModel extends typeof Model>(
+        this: ConcreteModel,
+        columnsOrValues: Array<keyof Schema>,
+        queryOptions: Omit<SelectQuery, "from">,
+      ): Promise<Array<InstanceType<ConcreteModel>>> {
+        const result = await select<Schema>(columnsOrValues, {
+          ...queryOptions,
+          from: this.tableName,
+        }, client);
+        return result.rows.map((row) => {
+          const instance = new this().set(row);
+          instance.persisted = true;
+          return instance as InstanceType<ConcreteModel>;
+        });
+      }
+
+      static build<ConcreteModel extends typeof Model>(
+        this: ConcreteModel,
+        values: Partial<Schema> = {},
+      ): InstanceType<ConcreteModel> {
+        return new this().set(
+          values,
+        ) as any;
+      }
+
+      static async find<ConcreteModel extends typeof Model>(
+        this: ConcreteModel,
+        primaryKey: Pk,
+        columnsOrValues: Array<keyof Schema> = Object.keys(
+          this.modelDefinition.columns,
+        ),
+      ): Promise<InstanceType<ConcreteModel>> {
+        if (primaryKey === null || typeof primaryKey === "undefined") {
+          throw new Error(`${primaryKey} is not a valid identifier`);
+        }
+        const primaryKeyColumn = getPrimaryKeyColumn(
+          this.modelDefinition.columns,
+        );
+        if (!primaryKeyColumn) {
+          throw new Error(
+            `${this.modelName} model doesn't have a known primary key`,
+          );
+        }
+        const result = await this.select(columnsOrValues, {
+          where: {
+            [primaryKeyColumn]: primaryKey,
+          } as unknown as Schema,
+          limit: 1,
+        });
+        const modelInstance = result[0];
+        if (!modelInstance) {
+          throw new Error(
+            `${this.modelName} with ${primaryKeyColumn}=${primaryKey} does not exist`,
+          );
+        }
+        return modelInstance;
+      }
+
+      static update(
+        query: UpdateQuery<Partial<Schema>>,
+      ): Promise<any> {
+        return update(this.tableName, query, client);
+      }
+
+      static async delete<Returning extends Record<PropertyKey, any>>(
+        query: Omit<DeleteQuery, "from">,
+      ): Promise<Returning[]> {
+        const result = await deleteQuery<Returning>(
+          { ...query, from: this.tableName },
+          client!,
+        );
+
+        return result;
+      }
+
+      static insert<ConcreteModel extends typeof Model>(
+        this: ConcreteModel,
+        values:
+          & Omit<Schema, keyof PrimaryKey>
+          & Partial<PrimaryKey>,
+      ): Promise<InstanceType<ConcreteModel>> {
+        return this.build(values).save() as any;
+      }
+
+      /** Public instance methods */
+
+      async save(): Promise<this> {
+        const payload = Object.entries(this.#dataValues).filter((
+          [_col, value],
+        ) => value !== null);
+        const [result] = await insertInto<PrimaryKey>(Model.tableName, {
+          values: Object.fromEntries(payload),
+          returning: Model.primaryKeyColumn,
+        }, client);
+
+        this.set(result);
+        this.#persisted = true;
+        return this;
+      }
+
+      async reload(): Promise<this> {
+        assertPersisted(this, Model);
+        const clone = await Model.find(this.primaryKey!);
+        this.set(clone.dataValues);
+        return this;
+      }
+
+      async update(
+        data: Partial<Schema>,
+      ): Promise<this> {
+        assertPersisted(this, Model);
+        this.set(data);
+        await Model.update({
+          set: data,
+          where: { [Model.primaryKeyColumn]: this.primaryKey },
+        });
+        return this;
+      }
+
+      async delete(): Promise<this> {
+        assertPersisted(this, Model);
+        await Model.delete({
+          where: { [Model.primaryKeyColumn]: this.primaryKey },
+        });
+        this.#persisted = false;
+        this.set({ id: null } as any);
+        return this as any;
+      }
+
+      toJSON() {
+        return JSON.stringify(this.#dataValues);
+      }
+    }
+    return Model as
+      & typeof Model
+      & ModelStatic
+      & Constructor<Schema>;
+  }
 }
 
 type TypeMap = {
@@ -355,29 +356,3 @@ type Optionality<
   Type,
 > = Column extends { notNull: true } | { primaryKey: true } ? Type
   : Type | null;
-
-/* class ORM<TMap extends ModelMap = {}> {
-  models: TMap = {} as TMap;
-  defineModel<
-    TName extends string,
-    TModelDefinition extends ModelDefinition,
-  >(
-    modelName: TName,
-    modelDefinition: TModelDefinition,
-  ): ORM<TMap & Record<TName, Model<TModelDefinition>>> {
-    this.models[modelName] = createModel<TModelDefinition>(
-      modelName,
-      modelDefinition,
-    ) as any;
-    return this as any;
-  }
-}
- */
-
-/* interface Model<Definition extends ModelDefinition = { columns: {} }> {
-  new (dataValues: Partial<Definition["columns"]>): {};
-  readonly modelName: string;
-  build(
-    values: Partial<TranslateDefinition<Definition>>,
-  ): ReturnType<typeof createModel>;
-} */

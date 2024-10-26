@@ -1,14 +1,22 @@
 // deno-lint-ignore-file no-explicit-any
 import type { Client } from "https://deno.land/x/postgres@v0.19.3/mod.ts";
 
-export type SelectQuery<Model extends Record<string, any>> = {
-    where?: Partial<
-        Record<keyof Model, any>
-    >;
+type WhereClause = Record<PropertyKey, any>;
+
+function getReturningClause(returning: string[] | string | undefined): string {
+    if (!returning) {
+        return "";
+    }
+    const selected = Array.isArray(returning) ? returning : [returning];
+    return "RETURNING " + selected.join(",");
+}
+
+export type SelectQuery = {
+    where?: WhereClause;
     from: string;
     orderBy?: Array<
         [
-            keyof Model,
+            string,
             "ASC" | "DESC",
         ]
     >;
@@ -41,7 +49,7 @@ export function select<
     Columns extends Record<string, any>,
 >(
     columnsOrValues: Array<keyof Columns>,
-    query: SelectQuery<Columns>,
+    query: SelectQuery,
     client: Client,
 ) {
     const { keys: whereColumns, values: whereArgs } = entries(
@@ -167,5 +175,38 @@ export async function insertInto<
         `,
         args: valuesToInsert,
     }).then((result) => result.rows);
+    return rows;
+}
+
+export type DeleteQuery = {
+    where: WhereClause;
+    returning?: Array<string> | string;
+    from: string;
+};
+
+export async function deleteQuery<Returning extends Record<PropertyKey, any>>(
+    query: DeleteQuery,
+    client: Client,
+): Promise<Returning[]> {
+    if (!query.where) {
+        throw new Error("Where clause is mandatory");
+    }
+
+    const whereEntries = entries(query.where);
+    const whereConditions = createWhereClause(
+        whereEntries.keys.map((column) => `${query.from}.${column}`),
+        1,
+        "AND",
+        "=",
+    );
+    const rows = await client.queryObject<Returning>({
+        text: `
+          DELETE FROM ${query.from}
+          WHERE ${whereConditions}
+          ${getReturningClause(query.returning)} 
+          `,
+        args: whereEntries.values,
+    }).then((result) => result.rows);
+
     return rows;
 }

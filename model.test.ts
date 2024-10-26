@@ -7,25 +7,25 @@ import {
   it,
 } from "jsr:@std/testing/bdd";
 import { assertSpyCall, assertSpyCalls, stub } from "jsr:@std/testing/mock";
-import { defineModel } from "./model.ts";
+import Orm from "./model.ts";
 import { expect } from "jsr:@std/expect";
-import { Client } from "https://deno.land/x/postgres@v0.19.3/mod.ts";
 
 describe({
   name: "defineModel function",
 }, () => {
+  const orm = new Orm();
   it("stores the Model definition", () => {
     const modelDefinition = {
       tableName: "models",
       columns: { id: { type: "integer", primaryKey: true } },
     } as const;
-    const Model = defineModel("Model", modelDefinition);
+    const Model = orm.defineModel("Model", modelDefinition);
     expect(Model.modelDefinition).toEqual(modelDefinition);
   });
 
   it("throws if the model does not define a primaryKey", () => {
     expect(() =>
-      defineModel("_", {
+      orm.defineModel("_", {
         tableName: "_",
         columns: { id: "integer" },
       }).build()
@@ -34,7 +34,8 @@ describe({
 });
 
 describe("Extended Model class", () => {
-  class Extended extends defineModel("Original", {
+  const orm = new Orm()
+  class Extended extends orm.defineModel("Original", {
     columns: { id: { type: "text", primaryKey: true } },
     tableName: "_",
   }) {}
@@ -47,13 +48,11 @@ describe("Extended Model class", () => {
 });
 
 describe("Unextended Model class", () => {
-  let db: Client;
+  const orm = new Orm();
 
   beforeAll(async () => {
-    db = new Client();
-
-    await db.connect();
-    await db.queryObject(`
+    await orm.client.connect();
+    await orm.client.queryObject(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         first_name TEXT,
@@ -62,16 +61,16 @@ describe("Unextended Model class", () => {
   });
 
   beforeEach(async () => {
-    await db.queryObject(`
+    await orm.client.queryObject(`
       TRUNCATE users
     `);
   });
 
   afterAll(async () => {
-    await db.queryObject(`
+    await orm.client.queryObject(`
       DROP TABLE users
     `);
-    await db.end();
+    await orm.client.end();
   });
 
   const modelDefinition = {
@@ -83,10 +82,10 @@ describe("Unextended Model class", () => {
     },
   } as const;
 
-  let User = defineModel("User", modelDefinition, db!);
+  let User = orm.defineModel("User", modelDefinition);
 
   beforeEach(() => {
-    User = defineModel("User", modelDefinition, db) as any;
+    User = orm.defineModel("User", modelDefinition) as any;
   });
 
   describe("static methods", () => {
@@ -104,7 +103,7 @@ describe("Unextended Model class", () => {
       });
 
       it("saves the primaryKey", () => {
-        const ModelWithPk = defineModel("_", {
+        const ModelWithPk = orm.defineModel("_", {
           tableName: "_",
           columns: {
             id: "integer",
@@ -155,7 +154,7 @@ describe("Unextended Model class", () => {
           last_name: "_",
         });
 
-        const { rows: [result] } = await db.queryObject<
+        const { rows: [result] } = await orm.client.queryObject<
           { rowFound: true } | null
         >(
           `
@@ -251,7 +250,7 @@ describe("Unextended Model class", () => {
           where: { id: user.id },
           returning: "id",
         });
-        expect(result).toBe(user.id);
+        expect(result.id).toBe(user.id);
       });
     });
 
