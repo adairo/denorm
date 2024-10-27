@@ -340,7 +340,7 @@ describe("Unextended Model class", () => {
 
       describe("when the instance is already persisted", () => {
         it("saves the new values on db", async () => {
-          const user = await User.create({ first_name: "_", last_name: "_" });
+          const user = await User.create({ first_name: "bar" });
           await user.setDataValue("first_name", "foo").save();
           const retrieved = await User.find(user.id);
           expect(retrieved.first_name).toBe("foo");

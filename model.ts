@@ -64,11 +64,11 @@ type ModelDefinition = {
 
 type ModelColumns = Record<
   string,
-  ColumnType | ColumnDefinition
+  DataType | ColumnDefinition
 >;
 
 type ColumnDefinition = {
-  type: ColumnType;
+  type: DataType;
   notNull?: boolean;
   primaryKey?: boolean;
 };
@@ -282,9 +282,8 @@ export default class Orm {
             if (column === Model.primaryKeyColumn) {
               return object;
             }
-            
-            const value = this.getDataValue(column);
-            object[column] = value;
+
+            object[column] = this.getDataValue(column);
             return object;
           },
           Object.create(null),
@@ -350,21 +349,35 @@ type TypeMap = {
   [dataType: `timestamp${string | undefined}`]: Date;
 };
 
-type ColumnType = keyof TypeMap;
+type DataType = keyof TypeMap;
 
 type ModelSchema<
   Definition extends ModelDefinition,
   Columns = Definition["columns"],
-> = {
-  [Col in keyof Columns]: Columns[Col] extends ColumnType
-    ? Optionality<Columns[Col], TypeMap[Columns[Col]]>
-    : Columns[Col] extends { type: ColumnType }
-      ? Optionality<Columns[Col], TypeMap[Columns[Col]["type"]]>
-    : "Unsupported data type";
-};
+> =
+  & {
+    [
+      Col in keyof Columns as Columns[Col] extends
+        { type: DataType; notNull: true } | {
+          type: DataType;
+          primaryKey: true;
+        } ? Col
+        : never
+    ]: Columns[Col] extends { type: DataType } ? TypeMap[Columns[Col]["type"]]
+      : never;
+  }
+  & Partial<
+    {
+      [Col in keyof Columns as Columns[Col] extends DataType ? Col : never]:
+        Columns[Col] extends DataType ? TypeMap[Columns[Col]]
+          : never;
+    }
+  >;
 
-type Optionality<
-  Column extends ColumnDefinition | ColumnType,
-  Type,
-> = Column extends { notNull: true } | { primaryKey: true } ? Type
-  : Type | null;
+type a = ModelSchema<{
+  tableName: "";
+  columns: {
+    first_name: "text";
+  };
+}>;
+
