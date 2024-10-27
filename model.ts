@@ -13,8 +13,6 @@ import {
 } from "./queries.ts";
 import type { ClientConfiguration } from "https://deno.land/x/postgres@v0.19.3/connection/connection_params.ts";
 
-let client: Client | undefined;
-
 function assertPersisted(
   instance: any,
   model: ModelStatic,
@@ -215,7 +213,7 @@ export default class Orm {
         ) as any;
       }
 
-      static async find<ConcreteModel extends typeof Model>(
+      static async findByPk<ConcreteModel extends typeof Model>(
         this: ConcreteModel,
         primaryKey: Pk,
         columnsOrValues: Array<keyof Schema> = Object.keys(
@@ -225,13 +223,13 @@ export default class Orm {
         if (primaryKey === null || typeof primaryKey === "undefined") {
           throw new Error(`${primaryKey} is not a valid identifier`);
         }
-        const result = await this.select(columnsOrValues, {
+        const [modelInstance] = await this.select(columnsOrValues, {
           where: {
             [Model.primaryKeyColumn]: primaryKey,
           } as unknown as Schema,
           limit: 1,
         });
-        const modelInstance = result[0];
+
         if (!modelInstance) {
           throw new Error(
             `${this.modelName} with ${Model.primaryKeyColumn}=${primaryKey} does not exist`,
@@ -302,7 +300,7 @@ export default class Orm {
 
       async reload(): Promise<this> {
         assertPersisted(this, Model);
-        const clone = await Model.find(this.primaryKey!);
+        const clone = await Model.findByPk(this.primaryKey!);
         this.set(clone.dataValues);
         return this;
       }

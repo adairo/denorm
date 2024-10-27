@@ -133,7 +133,7 @@ describe("Unextended Model class", () => {
       });
     });
 
-    describe("Model.find()", () => {
+    describe("Model.findByPk()", () => {
       let user = new User();
       const userData = { first_name: "Find", last_name: "Method" };
 
@@ -142,33 +142,33 @@ describe("Unextended Model class", () => {
       });
 
       it("Returns a persisted instance of the model", async () => {
-        user = await User.find(user.id);
+        user = await User.findByPk(user.id);
         expect(user).toBeInstanceOf(User);
         expect(user.persisted).toBeTruthy();
       });
 
       it("Has the provided dataValues", async () => {
-        user = await User.find(user.id);
+        user = await User.findByPk(user.id);
         expect(user.first_name).toEqual(userData.first_name);
         expect(user.last_name).toEqual(userData.last_name);
       });
 
       it("Fetches only passed columns if specified", async () => {
-        user = await User.find(user.id, ["last_name"]);
+        user = await User.findByPk(user.id, ["last_name"]);
         expect(user.id).toBeNull();
         expect(user.first_name).toBeNull();
         expect(user.last_name).toBe(userData.last_name);
       });
 
       it("Throws if passed nullish param", () => {
-        expect(User.find(null as any)).rejects.toThrow(
+        expect(User.findByPk(null as any)).rejects.toThrow(
           "is not a valid identifier",
         );
-        expect(User.find(undefined as any)).rejects.toThrow();
+        expect(User.findByPk(undefined as any)).rejects.toThrow();
       });
 
       it("Throws if it doesnt find a row with that Pk", () => {
-        expect(User.find(-1)).rejects.toThrow("User with id=-1 does not exist");
+        expect(User.findByPk(-1)).rejects.toThrow("User with id=-1 does not exist");
       });
     });
 
@@ -188,7 +188,7 @@ describe("Unextended Model class", () => {
           set: { first_name: "Updated" },
           where: { id: user.id },
         });
-        const retrieved = await User.find(user.id);
+        const retrieved = await User.findByPk(user.id);
         expect(retrieved.first_name).toBe("Updated");
       });
 
@@ -206,7 +206,7 @@ describe("Unextended Model class", () => {
       it("removes the row from db", async () => {
         const user = await User.create({ first_name: "_", last_name: "" });
         await User.delete({ where: { id: user.id } });
-        expect(User.find(user.id)).rejects.toThrow("does not exist");
+        expect(User.findByPk(user.id)).rejects.toThrow("does not exist");
       });
 
       it("can return the id of deleted row", async () => {
@@ -342,7 +342,7 @@ describe("Unextended Model class", () => {
         it("saves the new values on db", async () => {
           const user = await User.create({ first_name: "bar" });
           await user.setDataValue("first_name", "foo").save();
-          const retrieved = await User.find(user.id);
+          const retrieved = await User.findByPk(user.id);
           expect(retrieved.first_name).toBe("foo");
         });
       });
