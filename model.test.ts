@@ -7,29 +7,71 @@ import {
   it,
 } from "jsr:@std/testing/bdd";
 import { assertSpyCall, assertSpyCalls, stub } from "jsr:@std/testing/mock";
-import Orm from "./model.ts";
+import Orm, { type ModelDefinition } from "./model.ts";
 import { expect } from "jsr:@std/expect";
+import { Client } from "https://deno.land/x/postgres@v0.19.3/mod.ts";
 
-describe({
-  name: "defineModel function",
-}, () => {
-  const orm = new Orm();
-  it("stores the Model definition", () => {
-    const modelDefinition = {
-      tableName: "models",
-      columns: { id: { type: "integer", primaryKey: true } },
-    } as const;
-    const Model = orm.defineModel("Model", modelDefinition);
-    expect(Model.modelDefinition).toEqual(modelDefinition);
+describe("Orm class", () => {
+  describe("constructor", () => {
+    it("initializes and exposes client", () => {
+      const orm = new Orm();
+      expect(orm.client).toBeInstanceOf(Client);
+    });
   });
 
-  it("throws if the model does not define a primaryKey", () => {
-    expect(() =>
-      orm.defineModel("_", {
+  describe("Orm.client", () => {
+    it("can connect to and end connection from db", async () => {
+      const orm = new Orm();
+      await expect((async () => {
+        await orm.client.connect();
+        await orm.client.end();
+        return true;
+      })()).resolves
+        .toBe(true);
+    });
+  });
+
+  describe("Orm.prototype.defineModel", () => {
+    it("stores the Model definition", () => {
+      const modelDefinition = {
+        tableName: "models",
+        columns: { id: { type: "integer", primaryKey: true } },
+      } satisfies ModelDefinition;
+      const Model = new Orm().defineModel("Model", modelDefinition);
+      expect(Model.modelDefinition).toEqual(modelDefinition);
+    });
+
+    it("identifies the primaryKey", () => {
+      const Model = new Orm().defineModel("_", {
         tableName: "_",
-        columns: { id: "integer" },
-      })
-    ).toThrow();
+        columns: {
+          id: "integer",
+          uuid: { type: "uuid", primaryKey: true },
+        },
+      });
+      expect(Model.primaryKeyColumn).toBe("uuid");
+    });
+
+    it("throws if the model does not define a primaryKey", () => {
+      expect(() =>
+        new Orm().defineModel("_", {
+          tableName: "_",
+          columns: { id: "integer" },
+        })
+      ).toThrow();
+    });
+
+    it("throws if the model defines more than one primaryKey", () => {
+      expect(() =>
+        new Orm().defineModel("_", {
+          tableName: "_",
+          columns: {
+            id: { type: "integer", primaryKey: true },
+            uuid: { type: "uuid", primaryKey: true },
+          },
+        })
+      ).toThrow();
+    });
   });
 });
 
@@ -168,7 +210,9 @@ describe("Unextended Model class", () => {
       });
 
       it("Throws if it doesnt find a row with that Pk", () => {
-        expect(User.findByPk(-1)).rejects.toThrow("User with id=-1 does not exist");
+        expect(User.findByPk(-1)).rejects.toThrow(
+          "User with id=-1 does not exist",
+        );
       });
     });
 

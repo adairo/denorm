@@ -15,7 +15,7 @@ import type { ClientConfiguration } from "https://deno.land/x/postgres@v0.19.3/c
 
 function assertPersisted(
   instance: any,
-  model: ModelStatic,
+  model: Model,
 ): void {
   if (instance.primaryKey === null || !instance.persisted) {
     throw new Error(
@@ -24,8 +24,8 @@ function assertPersisted(
   }
 }
 
-function getPrimaryKeyColumn(columns: ModelColumns): string | null {
-  const primaryKey = Object.keys(columns).find(
+function getPrimaryKeyColumn(columns: ModelColumns): string {
+  const primaryKeys = Object.keys(columns).filter(
     (column) => {
       const definition = columns[column];
 
@@ -38,24 +38,19 @@ function getPrimaryKeyColumn(columns: ModelColumns): string | null {
     },
   );
 
-  if (!primaryKey) {
-    return null;
+  if (primaryKeys.length !== 1) {
+    throw new Error("A model must define one and only one primary key");
   }
 
-  return primaryKey;
+  return primaryKeys[0];
 }
 
-type ModelStatic = {
-  tableName: string;
+type Model = {
   modelName: string;
   modelDefinition: ModelDefinition;
 };
 
-type Constructor<T, K extends any[] = any[]> = new (
-  ...any: K
-) => T;
-
-type ModelDefinition = {
+export type ModelDefinition = {
   tableName: string;
   columns: ModelColumns;
 };
@@ -70,6 +65,21 @@ type ColumnDefinition = {
   notNull?: boolean;
   primaryKey?: boolean;
 };
+
+type TypeMap = {
+  "text": string;
+  "uuid": string;
+  "integer": number;
+  "boolean": boolean;
+  [dataType: `date${string | undefined}`]: Date;
+  [dataType: `timestamp${string | undefined}`]: Date;
+};
+
+type DataType = keyof TypeMap;
+
+type Constructor<T, K extends any[] = any[]> = new (
+  ...any: K
+) => T;
 
 type GetPrimaryKey<Columns extends ModelDefinition["columns"]> = {
   [
@@ -103,10 +113,12 @@ export default class Orm {
     modelDefinition: Definition,
   ) {
     const client = this.#client;
-    class Model {
+    class _Model {
       static modelName: string = modelName;
-      static tableName: string = modelDefinition.tableName;
       static modelDefinition: Definition = modelDefinition;
+      static primaryKeyColumn: string = getPrimaryKeyColumn(
+        this.modelDefinition.columns,
+      );
       #dataValues: Schema;
       #persisted: boolean = false;
 
@@ -124,7 +136,7 @@ export default class Orm {
       }
 
       get primaryKey(): Pk | null {
-        return this.dataValues[Model.primaryKeyColumn];
+        return this.dataValues[_Model.primaryKeyColumn];
       }
 
       get persisted(): boolean {
@@ -146,22 +158,10 @@ export default class Orm {
         return this;
       }
 
-      /** Static members */
-
-      static primaryKeyColumn: string;
-
-      static {
-        const pkColumn = getPrimaryKeyColumn(this.modelDefinition.columns);
-        if (!pkColumn) {
-          throw new Error(
-            "It is mandatory for a model to define a primary key",
-          );
-        }
-        this.primaryKeyColumn = pkColumn;
-      }
+      /** Static methods */
 
       constructor() {
-        const modelColumns = Model.columns();
+        const modelColumns = _Model.columns();
         this.#dataValues = modelColumns.reduce((object, column) => {
           Object.defineProperty(object, column, {
             value: null,
@@ -173,10 +173,10 @@ export default class Orm {
 
         modelColumns.forEach((column) =>
           Object.defineProperty(this, column, {
-            get(this: Model) {
+            get(this: _Model) {
               return this.getDataValue(column);
             },
-            set(this: Model, value: any) {
+            set(this: _Model, value: any) {
               this.setDataValue(column, value);
             },
             enumerable: true,
@@ -188,14 +188,14 @@ export default class Orm {
         return Object.keys(this.modelDefinition.columns);
       }
 
-      static async select<ConcreteModel extends typeof Model>(
+      static async select<ConcreteModel extends typeof _Model>(
         this: ConcreteModel,
         columnsOrValues: Array<keyof Schema> | string[],
         queryOptions: Omit<SelectQuery<Schema>, "from">,
       ): Promise<Array<InstanceType<ConcreteModel>>> {
         const result = await select<Schema>(columnsOrValues, {
           ...queryOptions,
-          from: this.tableName,
+          from: this.modelDefinition.tableName,
         }, client);
         return result.rows.map((row) => {
           const instance = new this().set(row);
@@ -204,7 +204,7 @@ export default class Orm {
         });
       }
 
-      static build<ConcreteModel extends typeof Model>(
+      static build<ConcreteModel extends typeof _Model>(
         this: ConcreteModel,
         values: Partial<Schema> = {},
       ): InstanceType<ConcreteModel> {
@@ -213,7 +213,7 @@ export default class Orm {
         ) as any;
       }
 
-      static async findByPk<ConcreteModel extends typeof Model>(
+      static async findByPk<ConcreteModel extends typeof _Model>(
         this: ConcreteModel,
         primaryKey: Pk,
         columnsOrValues: Array<keyof Schema> = Object.keys(
@@ -225,14 +225,14 @@ export default class Orm {
         }
         const [modelInstance] = await this.select(columnsOrValues, {
           where: {
-            [Model.primaryKeyColumn]: primaryKey,
+            [_Model.primaryKeyColumn]: primaryKey,
           } as unknown as Schema,
           limit: 1,
         });
 
         if (!modelInstance) {
           throw new Error(
-            `${this.modelName} with ${Model.primaryKeyColumn}=${primaryKey} does not exist`,
+            `${this.modelName} with ${_Model.primaryKeyColumn}=${primaryKey} does not exist`,
           );
         }
         return modelInstance;
@@ -241,21 +241,21 @@ export default class Orm {
       static update(
         query: UpdateQuery<Partial<Schema>>,
       ): Promise<any> {
-        return update(this.tableName, query, client);
+        return update(this.modelDefinition.tableName, query, client);
       }
 
       static async delete<Returning extends Record<PropertyKey, any>>(
         query: Omit<DeleteQuery, "from">,
       ): Promise<Returning[]> {
         const result = await deleteQuery<Returning>(
-          { ...query, from: this.tableName },
+          { ...query, from: this.modelDefinition.tableName },
           client!,
         );
 
         return result;
       }
 
-      static create<ConcreteModel extends typeof Model>(
+      static create<ConcreteModel extends typeof _Model>(
         this: ConcreteModel,
         values:
           & Omit<Schema, keyof PrimaryKey>
@@ -271,13 +271,13 @@ export default class Orm {
           return this.update(this.dataValues);
         }
 
-        const allowedKeys = new Set(Model.columns()).intersection(
+        const allowedKeys = new Set(_Model.columns()).intersection(
           new Set(Object.keys(this.dataValues)),
         );
 
         const payload = allowedKeys.keys().reduce<Record<string, any>>(
           (object, column) => {
-            if (column === Model.primaryKeyColumn) {
+            if (column === _Model.primaryKeyColumn) {
               return object;
             }
 
@@ -287,10 +287,14 @@ export default class Orm {
           Object.create(null),
         );
 
-        const [result] = await insertInto<PrimaryKey>(Model.tableName, {
-          values: payload,
-          returning: Model.primaryKeyColumn,
-        }, client);
+        const [result] = await insertInto<PrimaryKey>(
+          _Model.modelDefinition.tableName,
+          {
+            values: payload,
+            returning: _Model.primaryKeyColumn,
+          },
+          client,
+        );
 
         this.set(result); // set primaryKey
         this.#persisted = true;
@@ -299,8 +303,8 @@ export default class Orm {
       }
 
       async reload(): Promise<this> {
-        assertPersisted(this, Model);
-        const clone = await Model.findByPk(this.primaryKey!);
+        assertPersisted(this, _Model);
+        const clone = await _Model.findByPk(this.primaryKey!);
         this.set(clone.dataValues);
         return this;
       }
@@ -308,19 +312,19 @@ export default class Orm {
       async update(
         data: Partial<Schema>,
       ): Promise<this> {
-        assertPersisted(this, Model);
+        assertPersisted(this, _Model);
         this.set(data);
-        await Model.update({
+        await _Model.update({
           set: data,
-          where: { [Model.primaryKeyColumn]: this.primaryKey },
+          where: { [_Model.primaryKeyColumn]: this.primaryKey },
         });
         return this;
       }
 
       async delete(): Promise<this> {
-        assertPersisted(this, Model);
-        await Model.delete({
-          where: { [Model.primaryKeyColumn]: this.primaryKey },
+        assertPersisted(this, _Model);
+        await _Model.delete({
+          where: { [_Model.primaryKeyColumn]: this.primaryKey },
         });
         this.#persisted = false;
         this.set({ id: null } as any);
@@ -331,23 +335,12 @@ export default class Orm {
         return JSON.stringify(this.#dataValues);
       }
     }
-    return Model as
-      & typeof Model
-      & ModelStatic
+    return _Model as
+      & typeof _Model
+      & Model
       & Constructor<Schema>;
   }
 }
-
-type TypeMap = {
-  "text": string;
-  "uuid": string;
-  "integer": number;
-  "boolean": boolean;
-  [dataType: `date${string | undefined}`]: Date;
-  [dataType: `timestamp${string | undefined}`]: Date;
-};
-
-type DataType = keyof TypeMap;
 
 type ModelSchema<
   Definition extends ModelDefinition,
@@ -371,11 +364,3 @@ type ModelSchema<
           : never;
     }
   >;
-
-type a = ModelSchema<{
-  tableName: "";
-  columns: {
-    first_name: "text";
-  };
-}>;
-
