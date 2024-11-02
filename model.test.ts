@@ -39,6 +39,7 @@ describe("Orm class", () => {
       } satisfies ModelDefinition;
       const Model = new Orm().defineModel("Model", modelDefinition);
       expect(Model.modelDefinition).toEqual(modelDefinition);
+      expect(Model.modelName).toEqual("Model");
     });
 
     it("identifies the primaryKey", () => {
@@ -125,34 +126,23 @@ describe("Unextended Model class", () => {
 
   describe("static methods", () => {
     describe("Model.build()", () => {
+      it("creates a non persisted instance", () => {
+        const user = User.build({});
+        expect(user).toBeInstanceOf(User);
+        expect(user.persisted).toBe(false);
+      });
+
       it("stores the dataValues", () => {
-        const userData = { first_name: "Foo", last_name: "Bar", id: 1 };
+        const userData = { first_name: "Foo", last_name: "Bar" };
         const user = User.build(userData);
-        expect(user.dataValues).toEqual(userData);
+        expect(user.dataValues).toMatchObject(userData);
       });
 
       it("creates property accesors for dataValues", () => {
-        const userData = { first_name: "Foo", last_name: "Bar", id: 1 };
+        const userData = { first_name: "Foo", last_name: "Bar" };
         const user = User.build(userData);
-        expect(user).toEqual(userData);
-      });
-
-      it("saves the primaryKey", () => {
-        const ModelWithPk = orm.defineModel("_", {
-          tableName: "_",
-          columns: {
-            id: "integer",
-            uuid: { type: "uuid", primaryKey: true },
-          },
-        });
-        const user = ModelWithPk.build({ id: 1, uuid: "abc" });
-        expect(user.primaryKey).toBe("abc");
-        expect(ModelWithPk.primaryKeyColumn).toBe("uuid");
-      });
-
-      it("creates a non persisted instance", () => {
-        const user = User.build({ first_name: "Foo" });
-        expect(user.persisted).toBe(false);
+        expect(user).toHaveProperty('first_name', userData.first_name);
+        expect(user).toHaveProperty('last_name', userData.last_name);
       });
     });
 

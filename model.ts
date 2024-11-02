@@ -184,7 +184,7 @@ export default class Orm {
         );
       }
 
-      static columns() {
+      static columns(): string[] {
         return Object.keys(this.modelDefinition.columns);
       }
 
