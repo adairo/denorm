@@ -34,16 +34,18 @@ describe("Orm class", () => {
   describe("Orm.prototype.defineModel", () => {
     it("stores the Model definition", () => {
       const modelDefinition = {
+        modelName: "Model",
         tableName: "models",
         columns: { id: { type: "integer", primaryKey: true } },
       } satisfies ModelDefinition;
-      const Model = new Orm().defineModel("Model", modelDefinition);
+      const Model = new Orm().defineModel(modelDefinition);
       expect(Model.modelDefinition).toEqual(modelDefinition);
       expect(Model.modelName).toEqual("Model");
     });
 
     it("identifies the primaryKey", () => {
-      const Model = new Orm().defineModel("_", {
+      const Model = new Orm().defineModel({
+        modelName: "_",
         tableName: "_",
         columns: {
           id: "integer",
@@ -55,7 +57,8 @@ describe("Orm class", () => {
 
     it("throws if the model does not define a primaryKey", () => {
       expect(() =>
-        new Orm().defineModel("_", {
+        new Orm().defineModel({
+          modelName: "_",
           tableName: "_",
           columns: { id: "integer" },
         })
@@ -64,7 +67,8 @@ describe("Orm class", () => {
 
     it("throws if the model defines more than one primaryKey", () => {
       expect(() =>
-        new Orm().defineModel("_", {
+        new Orm().defineModel({
+          modelName: "_",
           tableName: "_",
           columns: {
             id: { type: "integer", primaryKey: true },
@@ -78,7 +82,8 @@ describe("Orm class", () => {
 
 describe("Extended Model class", () => {
   const orm = new Orm();
-  class Extended extends orm.defineModel("Original", {
+  class Extended extends orm.defineModel({
+    modelName: "Extended",
     columns: { id: { type: "text", primaryKey: true } },
     tableName: "_",
   }) {}
@@ -115,7 +120,8 @@ describe("Unextended Model class", () => {
     await orm.client.end();
   });
 
-  const User = orm.defineModel("User", {
+  const User = orm.defineModel({
+    modelName: "User",
     tableName: "users",
     columns: {
       id: { type: "integer", primaryKey: true },
@@ -141,8 +147,8 @@ describe("Unextended Model class", () => {
       it("creates property accesors for dataValues", () => {
         const userData = { first_name: "Foo", last_name: "Bar" };
         const user = User.build(userData);
-        expect(user).toHaveProperty('first_name', userData.first_name);
-        expect(user).toHaveProperty('last_name', userData.last_name);
+        expect(user).toHaveProperty("first_name", userData.first_name);
+        expect(user).toHaveProperty("last_name", userData.last_name);
       });
     });
 
