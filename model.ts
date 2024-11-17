@@ -66,7 +66,7 @@ type ColumnDefinition = {
   primaryKey?: boolean;
 };
 
-type TypeMap = {
+type DataTypeMap = {
   "text": string;
   "uuid": string;
   "integer": number;
@@ -75,7 +75,17 @@ type TypeMap = {
   [dataType: `timestamp${string | undefined}`]: Date;
 };
 
-type DataType = keyof TypeMap;
+type DataType = keyof DataTypeMap;
+
+type ModelSchema<
+  Definition extends ModelDefinition,
+  Columns = Definition["columns"],
+> = {
+  [Col in keyof Columns]: Columns[Col] extends DataType
+    ? DataTypeMap[Columns[Col]]
+    : Columns[Col] extends ColumnDefinition ? DataTypeMap[Columns[Col]["type"]]
+    : never;
+};
 
 type Constructor<T, K extends any[] = any[]> = new (
   ...any: K
@@ -86,7 +96,7 @@ type GetPrimaryKey<Columns extends ModelDefinition["columns"]> = {
     Key in keyof Columns as Columns[Key] extends ColumnDefinition
       ? Columns[Key]["primaryKey"] extends true ? Key : never
       : never
-  ]: Columns[Key] extends ColumnDefinition ? TypeMap[Columns[Key]["type"]]
+  ]: Columns[Key] extends ColumnDefinition ? DataTypeMap[Columns[Key]["type"]]
     : never;
 };
 
@@ -258,7 +268,7 @@ export default class Orm {
       static create<ConcreteModel extends typeof _Model>(
         this: ConcreteModel,
         values:
-          & Omit<Schema, keyof PrimaryKey>
+          & Omit<Partial<Schema>, keyof PrimaryKey>
           & Partial<PrimaryKey>,
       ): Promise<InstanceType<ConcreteModel>> {
         return this.build(values).save() as any;
@@ -341,26 +351,3 @@ export default class Orm {
       & Constructor<Schema>;
   }
 }
-
-type ModelSchema<
-  Definition extends ModelDefinition,
-  Columns = Definition["columns"],
-> =
-  & {
-    [
-      Col in keyof Columns as Columns[Col] extends
-        { type: DataType; notNull: true } | {
-          type: DataType;
-          primaryKey: true;
-        } ? Col
-        : never
-    ]: Columns[Col] extends { type: DataType } ? TypeMap[Columns[Col]["type"]]
-      : never;
-  }
-  & Partial<
-    {
-      [Col in keyof Columns as Columns[Col] extends DataType ? Col : never]:
-        Columns[Col] extends DataType ? TypeMap[Columns[Col]]
-          : never;
-    }
-  >;
