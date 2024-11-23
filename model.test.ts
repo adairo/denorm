@@ -10,6 +10,7 @@ import { assertSpyCall, assertSpyCalls, stub } from "jsr:@std/testing/mock";
 import Orm, { type ModelDefinition } from "./model.ts";
 import { expect } from "jsr:@std/expect";
 import { Client } from "https://deno.land/x/postgres@v0.19.3/mod.ts";
+import { select } from "./queries.ts";
 
 describe("Orm class", () => {
   describe("constructor", () => {
@@ -176,37 +177,37 @@ describe("Unextended Model class", () => {
       const userData = { first_name: "Find", last_name: "Method" };
 
       beforeEach(async () => {
-        user = await User.create(userData);
+        user = await User.build(userData).save();
       });
 
       it("Returns a persisted instance of the model", async () => {
-        user = await User.findByPk(user.id);
+        user = await User.find(user.id);
         expect(user).toBeInstanceOf(User);
         expect(user.persisted).toBeTruthy();
       });
 
       it("Has the provided dataValues", async () => {
-        user = await User.findByPk(user.id);
+        user = await User.find(user.id);
         expect(user.first_name).toEqual(userData.first_name);
         expect(user.last_name).toEqual(userData.last_name);
       });
 
       it("Fetches only passed columns if specified", async () => {
-        user = await User.findByPk(user.id, ["last_name"]);
+        user = await User.find(user.id, ["last_name"]);
         expect(user.id).toBeNull();
         expect(user.first_name).toBeNull();
         expect(user.last_name).toBe(userData.last_name);
       });
 
       it("Throws if passed nullish param", () => {
-        expect(User.findByPk(null as any)).rejects.toThrow(
+        expect(User.find(null as any)).rejects.toThrow(
           "is not a valid identifier",
         );
-        expect(User.findByPk(undefined as any)).rejects.toThrow();
+        expect(User.find(undefined as any)).rejects.toThrow();
       });
 
       it("Throws if it doesnt find a row with that Pk", () => {
-        expect(User.findByPk(-1)).rejects.toThrow(
+        expect(User.find(-1)).rejects.toThrow(
           "User with id=-1 does not exist",
         );
       });
@@ -228,7 +229,7 @@ describe("Unextended Model class", () => {
           set: { first_name: "Updated" },
           where: { id: user.id },
         });
-        const retrieved = await User.findByPk(user.id);
+        const retrieved = await User.find(user.id);
         expect(retrieved.first_name).toBe("Updated");
       });
 
@@ -246,7 +247,7 @@ describe("Unextended Model class", () => {
       it("removes the row from db", async () => {
         const user = await User.create({ first_name: "_", last_name: "" });
         await User.delete({ where: { id: user.id } });
-        expect(User.findByPk(user.id)).rejects.toThrow("does not exist");
+        expect(User.find(user.id)).rejects.toThrow("does not exist");
       });
 
       it("can return the id of deleted row", async () => {
@@ -369,20 +370,28 @@ describe("Unextended Model class", () => {
 
         it("can be retrived from db", async () => {
           const user = await User.build({ first_name: "_" }).save();
-
-          const [retrieved] = await User.select(["id", "first_name"], {
+          const { rows: [retrieved] } = await select(orm.client, [
+            "id",
+            "first_name",
+          ], {
+            from: "users",
             where: { id: user.id },
           });
-          expect(retrieved.primaryKey).toBeDefined();
+          expect(retrieved.id).toBeDefined();
           expect(retrieved.first_name).toBe("_");
         });
       });
 
       describe("when the instance is already persisted", () => {
         it("saves the new values on db", async () => {
-          const user = await User.create({ first_name: "bar" });
+          const user = await User.build({ first_name: "bar" }).save();
           await user.setDataValue("first_name", "foo").save();
-          const retrieved = await User.findByPk(user.id);
+          const { rows: [retrieved] } = await select(orm.client, [
+            "first_name",
+          ], {
+            from: "users",
+            where: { id: user.id },
+          });
           expect(retrieved.first_name).toBe("foo");
         });
       });

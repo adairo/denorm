@@ -96,9 +96,7 @@ type GetPrimaryKey<Columns extends ModelDefinition["columns"]> = {
     : never;
 };
 
-type ValuesOf<Object extends Record<any, any>> = Object extends
-  { [key: PropertyKey]: infer T } ? T : never;
-
+type ValuesOf<Object extends Record<PropertyKey, any>> = Object[keyof Object]
 export default class Orm {
   #client: Client;
   constructor(config?: ClientConfiguration) {
@@ -141,7 +139,7 @@ export default class Orm {
       }
 
       get primaryKey(): Pk | null {
-        return this.dataValues[Model.primaryKeyColumn];
+        return this.getDataValue(Model.primaryKeyColumn) as any;
       }
 
       get persisted(): boolean {
@@ -198,15 +196,15 @@ export default class Orm {
         columnsOrValues: Array<keyof Schema> | string[],
         queryOptions: Omit<SelectQuery<Schema>, "from">,
       ): Promise<Array<InstanceType<ConcreteModel>>> {
-        const result = await select<Schema>(columnsOrValues, {
+        const result = await select<Schema>(client, columnsOrValues, {
           ...queryOptions,
           from: this.modelDefinition.tableName,
-        }, client);
+        });
         return result.rows.map((row) => {
           const instance = new this().set(row);
           instance.persisted = true;
-          return instance as InstanceType<ConcreteModel>;
-        });
+          return instance;
+        }) as any;
       }
 
       static build<ConcreteModel extends typeof Model>(
@@ -218,12 +216,10 @@ export default class Orm {
         ) as any;
       }
 
-      static async findByPk<ConcreteModel extends typeof Model>(
+      static async find<ConcreteModel extends typeof Model>(
         this: ConcreteModel,
         primaryKey: Pk,
-        columnsOrValues: Array<keyof Schema> = Object.keys(
-          this.modelDefinition.columns,
-        ),
+        columnsOrValues: Array<keyof Schema> = Model.columns()
       ): Promise<InstanceType<ConcreteModel>> {
         if (primaryKey === null || typeof primaryKey === "undefined") {
           throw new Error(`${primaryKey} is not a valid identifier`);
@@ -282,23 +278,24 @@ export default class Orm {
 
         const payload = allowedKeys.keys().reduce<Record<string, any>>(
           (object, column) => {
-            if (column === Model.primaryKeyColumn) {
+            const value = this.getDataValue(column);
+            if (column === Model.primaryKeyColumn && value === null) {
               return object;
             }
 
-            object[column] = this.getDataValue(column);
+            object[column] = value;
             return object;
           },
           Object.create(null),
         );
 
-        const [result] = await insertInto<PrimaryKey>(
+        const { rows: [result] } = await insertInto<PrimaryKey>(
+          client,
           Model.modelDefinition.tableName,
           {
             values: payload,
             returning: Model.primaryKeyColumn,
           },
-          client,
         );
 
         this.set(result); // set primaryKey
@@ -309,7 +306,7 @@ export default class Orm {
 
       async reload(): Promise<this> {
         assertPersisted(this, Model.modelName);
-        const clone = await Model.findByPk(this.primaryKey!);
+        const clone = await Model.find(this.primaryKey!);
         this.set(clone.dataValues);
         return this;
       }
