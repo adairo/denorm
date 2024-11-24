@@ -215,13 +215,12 @@ describe("Unextended Model class", () => {
 
     describe("Model.update()", () => {
       let user = new User();
-      const initialValues = {
-        first_name: "John",
-        last_name: "Values",
-      };
 
       beforeEach(async () => {
-        user = await User.create(initialValues);
+        user = await User.create({
+          first_name: "John",
+          last_name: "Values",
+        });
       });
 
       it("Updates values on db", async () => {
@@ -240,6 +239,7 @@ describe("Unextended Model class", () => {
           returning: ["id"],
         });
         expect(result.id).toBe(user.id);
+        expect(result.first_name).toBeUndefined();
       });
     });
 
@@ -250,13 +250,15 @@ describe("Unextended Model class", () => {
         expect(User.find(user.id)).rejects.toThrow("does not exist");
       });
 
-      it("can return the id of deleted row", async () => {
-        const user = await User.create({ first_name: "_", last_name: "" });
+      it("returns the specified columns from deleted row", async () => {
+        const user = await User.create({ first_name: "foo", last_name: "" });
         const [result] = await User.delete({
           where: { id: user.id },
-          returning: "id",
+          returning: ["id", "first_name"],
         });
         expect(result.id).toBe(user.id);
+        expect(result.first_name).toBe(user.first_name);
+        expect(result.last_name).toBeUndefined();
       });
     });
 
@@ -270,25 +272,24 @@ describe("Unextended Model class", () => {
   });
 
   describe("instance methods", () => {
-    const userData = { first_name: "Foo", last_name: "Bar" };
-    let userInstance = User.build({});
+    describe("setters", () => {
+      let user = new User();
 
-    beforeEach(() => {
-      userInstance = User.build(userData);
-    });
+      beforeEach(() => {
+        user = User.build({ first_name: "Foo", last_name: "Bar" });
+      });
 
-    describe("using setters to set properties", () => {
       it("mutates the instance", () => {
-        userInstance.last_name = "Updated";
-        expect(userInstance.last_name).toBe("Updated");
+        user.last_name = "Updated";
+        expect(user.last_name).toBe("Updated");
       });
 
       it("does not mutate db values", async () => {
-        await userInstance.save();
-        userInstance.last_name = "Updated";
+        await user.save();
+        user.last_name = "Updated";
         const [retrieved] = await User.select(["last_name"], {
           where: {
-            id: userInstance.id,
+            id: user.id,
           },
         });
         expect(retrieved.last_name).not.toBe("Updated");
@@ -296,15 +297,27 @@ describe("Unextended Model class", () => {
     });
 
     describe("Model.prototype.set()", () => {
+      let user = new User();
+
+      beforeEach(() => {
+        user = User.build({ first_name: "Foo", last_name: "Bar" });
+      });
+
       it("stores multiple values passed", () => {
         const updatedData = { first_name: "Changed", id: 10 };
-        userInstance.set(updatedData);
-        const { first_name, id } = userInstance;
+        user.set(updatedData);
+        const { first_name, id } = user;
         expect({ first_name, id }).toEqual(updatedData);
       });
     });
 
     describe("Model.prototype.update()", () => {
+      let user = new User();
+
+      beforeEach(async () => {
+        user = await User.create({ first_name: "John", last_name: "Values" });
+      });
+
       it("throws if its called on a non persisted instance", () => {
         const nonPersisted = new User();
         expect(nonPersisted.update({ first_name: "_" })).rejects.toThrow(
@@ -313,8 +326,6 @@ describe("Unextended Model class", () => {
       });
 
       it("calls set() with the new values", async () => {
-        const user = await User.create({ first_name: "Foo", last_name: "Bar" });
-
         using setStub = stub(user, "set");
         await user.update({ first_name: "New" });
         assertSpyCalls(setStub, 1);
@@ -323,25 +334,14 @@ describe("Unextended Model class", () => {
         });
       });
 
-      it("calls Model.update() with the new values", async () => {
-        const user = await User.create({ first_name: "Foo", last_name: "Bar" });
-        using ModelUpdate = stub(User, "update");
-        await user.update({ first_name: "New" });
-        assertSpyCalls(ModelUpdate, 1);
-        assertSpyCall(ModelUpdate, 0, {
-          args: [{ set: { first_name: "New" }, where: { id: user.id } }],
-        });
-      });
-
-      it("calls Model.update()", async () => {
-        using updateSpy = stub(User, "update");
-        const user = await User.create({ first_name: "_", last_name: "" });
-        user.update({
+      it("calls Model.update() with new values", async () => {
+        using updateStub = stub(User, "update");
+        await user.update({
           first_name: "stubbed",
         });
 
-        assertSpyCalls(updateSpy, 1);
-        assertSpyCall(updateSpy, 0, {
+        assertSpyCalls(updateStub, 1);
+        assertSpyCall(updateStub, 0, {
           args: [{
             set: { first_name: "stubbed" },
             where: { id: user.id },
@@ -350,10 +350,8 @@ describe("Unextended Model class", () => {
       });
 
       it("returns the instance itself", async () => {
-        const updated = await userInstance.save().then(
-          (u) => u.update({ first_name: "_" }),
-        );
-        expect(updated).toStrictEqual(userInstance);
+        const updated = await user.update({ first_name: "_" });
+        expect(updated).toStrictEqual(user);
       });
     });
 
@@ -398,6 +396,27 @@ describe("Unextended Model class", () => {
     });
 
     describe("Model.prototype.delete()", () => {
+      it("calls Model.delete() with the instance primaryKey", async () => {
+        const user = await User.create({ first_name: "foo" });
+        using deleteStub = stub(User, "delete");
+        await user.delete();
+        assertSpyCalls(deleteStub, 1);
+        assertSpyCall(deleteStub, 0, {
+          args: [{ where: { id: user.id } }],
+        });
+      });
+
+      it("sets the instance as not persisted", async () => {
+        const user = await User.create({ first_name: "_" });
+        await user.delete();
+        expect(user.persisted).toBeFalsy();
+      });
+
+      it("sets the instance as deleted", async () => {
+        const user = await User.create({ first_name: "_" });
+        await user.delete();
+        expect(user.deleted).toBeTruthy();
+      });
     });
   });
 });

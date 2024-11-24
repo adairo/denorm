@@ -96,7 +96,7 @@ type GetPrimaryKey<Columns extends ModelDefinition["columns"]> = {
     : never;
 };
 
-type ValuesOf<Object extends Record<PropertyKey, any>> = Object[keyof Object]
+type ValuesOf<Object extends Record<PropertyKey, any>> = Object[keyof Object];
 export default class Orm {
   #client: Client;
   constructor(config?: ClientConfiguration) {
@@ -124,6 +124,7 @@ export default class Orm {
       );
       #dataValues: Schema;
       #persisted: boolean = false;
+      #deleted: boolean = false;
 
       /** Getters and setters */
       // deno-lint-ignore ban-types
@@ -150,6 +151,14 @@ export default class Orm {
         this.#persisted = persisted;
       }
 
+      get deleted(): boolean {
+        return this.#deleted;
+      }
+
+      private set deleted(deleted: boolean) {
+        this.#deleted = deleted;
+      }
+  
       get dataValues() {
         return this.#dataValues;
       }
@@ -219,7 +228,7 @@ export default class Orm {
       static async find<ConcreteModel extends typeof Model>(
         this: ConcreteModel,
         primaryKey: Pk,
-        columnsOrValues: Array<keyof Schema> = Model.columns()
+        columnsOrValues: Array<keyof Schema> = Model.columns(),
       ): Promise<InstanceType<ConcreteModel>> {
         if (primaryKey === null || typeof primaryKey === "undefined") {
           throw new Error(`${primaryKey} is not a valid identifier`);
@@ -241,7 +250,7 @@ export default class Orm {
 
       static update(
         query: UpdateQuery<Partial<Schema>>,
-      ): Promise<any> {
+      ): Promise<Partial<Schema>[]> {
         return update(this.modelDefinition.tableName, query, client);
       }
 
@@ -249,8 +258,8 @@ export default class Orm {
         query: Omit<DeleteQuery, "from">,
       ): Promise<Returning[]> {
         const result = await deleteQuery<Returning>(
+          client,
           { ...query, from: this.modelDefinition.tableName },
-          client!,
         );
 
         return result;
@@ -315,11 +324,11 @@ export default class Orm {
         data: Partial<Schema>,
       ): Promise<this> {
         assertPersisted(this, Model.modelName);
-        this.set(data);
         await Model.update({
           set: data,
           where: { [Model.primaryKeyColumn]: this.primaryKey },
         });
+        this.set(data);
         return this;
       }
 
@@ -328,8 +337,8 @@ export default class Orm {
         await Model.delete({
           where: { [Model.primaryKeyColumn]: this.primaryKey },
         });
-        this.#persisted = false;
-        this.set({ id: null } as any);
+        this.persisted = false;
+        this.deleted = true;
         return this as any;
       }
 
