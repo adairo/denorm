@@ -1,12 +1,15 @@
-// deno-lint-ignore-file no-explicit-any
+// deno-lint-ignore-file no-explicit-any ban-types
 import type {
   Client,
   QueryObjectResult,
 } from "https://deno.land/x/postgres@v0.19.3/mod.ts";
 
 type WhereClause = Record<PropertyKey, any>;
+type Returning<Columns extends Record<string, any> = any> =
+  | Array<keyof Columns | (string & {})>
+  | string;
 
-function getReturningClause(returning: string[] | string | undefined): string {
+function getReturningClause(returning?: Returning<any>): string {
   if (!returning) {
     return "";
   }
@@ -81,10 +84,10 @@ export function select<Columns extends Record<string, any>>(
   });
 }
 
-export type UpdateQuery<Model extends Record<string, any>> = {
-  set: Partial<Model>;
+export type UpdateQuery<Columns extends Record<string, any>> = {
+  set: Partial<Columns>;
   where: Record<string, any>;
-  returning?: Array<keyof Model> | string;
+  returning?: Returning<Columns>;
 };
 
 export async function update<
@@ -114,25 +117,17 @@ export async function update<
     updateEntries.values,
   );
 
-  const rows = await client.queryObject({
+  const result = await client.queryObject({
     text: `
           UPDATE ${tableName}
           SET ${updatedFields}
           WHERE ${whereConditions}
-          ${
-      query.returning
-        ? `RETURNING ${
-          Array.isArray(query.returning)
-            ? query.returning.join(",")
-            : query.returning
-        }`
-        : ""
-    }
+          ${getReturningClause(query.returning)}
           `,
     args,
-  }).then((result) => result.rows);
+  });
 
-  return rows as any;
+  return result.rows as any;
 }
 
 export type InsertQuery = {
@@ -141,48 +136,38 @@ export type InsertQuery = {
   returning?: Array<string> | string;
 };
 
-export function insertInto<
-  Returning extends Record<string, any>,
->(
+export function insertInto<T>(
   client: Client,
   tableName: string,
   query: InsertQuery,
-): Promise<QueryObjectResult<Returning>> {
+): Promise<QueryObjectResult<T>> {
   const { keys, values: valuesToInsert } = entries(query.values);
 
   const columnParameterList = valuesToInsert.map((_k, index) =>
     `$${index + 1}`
   );
 
-  return client.queryObject<Returning>({
+  return client.queryObject<T>({
     args: valuesToInsert,
     text: `
       INSERT INTO ${tableName}
         ${keys.length > 0 ? `(${keys.join(",")})` : ""} 
         ${keys.length > 0 ? `VALUES (${columnParameterList.join(",")})` : ""}
-            ${
-      query.returning
-        ? `RETURNING ${
-          Array.isArray(query.returning)
-            ? query.returning.join(",")
-            : query.returning
-        }`
-        : ""
-    }
+        ${getReturningClause(query.returning)}
         `,
-  })
+  });
 }
 
 export type DeleteQuery = {
   where: WhereClause;
-  returning?: Array<string> | string;
+  returning?: Returning;
   from: string;
 };
 
-export async function deleteQuery<Returning extends Record<PropertyKey, any>>(
-  query: DeleteQuery,
+export async function deleteQuery<R>(
   client: Client,
-): Promise<Returning[]> {
+  query: DeleteQuery,
+): Promise<R[]> {
   if (!query.where) {
     throw new Error("Where clause is mandatory");
   }
@@ -194,14 +179,14 @@ export async function deleteQuery<Returning extends Record<PropertyKey, any>>(
     "AND",
     "=",
   );
-  const rows = await client.queryObject<Returning>({
+  const result = await client.queryObject<R>({
     text: `
           DELETE FROM ${query.from}
           WHERE ${whereConditions}
           ${getReturningClause(query.returning)} 
           `,
     args: whereEntries.values,
-  }).then((result) => result.rows);
+  });
 
-  return rows;
+  return result.rows;
 }
