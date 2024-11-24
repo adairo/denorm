@@ -396,6 +396,13 @@ describe("Unextended Model class", () => {
     });
 
     describe("Model.prototype.delete()", () => {
+      it("throws if the instance is not persisted", () => {
+        const user = new User();
+        expect(user.delete()).rejects.toThrow(
+          "model instance is not persisted",
+        );
+      });
+
       it("calls Model.delete() with the instance primaryKey", async () => {
         const user = await User.create({ first_name: "foo" });
         using deleteStub = stub(User, "delete");
@@ -416,6 +423,26 @@ describe("Unextended Model class", () => {
         const user = await User.create({ first_name: "_" });
         await user.delete();
         expect(user.deleted).toBeTruthy();
+      });
+    });
+
+    describe("Model.prototype.reload()", () => {
+      it("reloads the instance data from db", async () => {
+        const user = await User.create({ first_name: "initial" });
+        await User.update({
+          set: { first_name: "updated" },
+          where: { id: user.id },
+        });
+
+        await user.reload();
+        expect(user.first_name).toBe("updated");
+      });
+
+      it("throws if the instance is not persisted", () => {
+        const user = new User();
+        expect(user.reload()).rejects.toThrow(
+          "model instance is not persisted",
+        );
       });
     });
   });

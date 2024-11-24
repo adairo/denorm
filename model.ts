@@ -158,7 +158,7 @@ export default class Orm {
       private set deleted(deleted: boolean) {
         this.#deleted = deleted;
       }
-  
+
       get dataValues() {
         return this.#dataValues;
       }
@@ -339,7 +339,7 @@ export default class Orm {
         });
         this.persisted = false;
         this.deleted = true;
-        return this as any;
+        return this;
       }
 
       toJSON() {
