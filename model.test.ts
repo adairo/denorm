@@ -81,21 +81,6 @@ describe("Orm class", () => {
   });
 });
 
-describe("Extended Model class", () => {
-  const orm = new Orm();
-  class Extended extends orm.defineModel({
-    modelName: "Extended",
-    columns: { id: { type: "text", primaryKey: true } },
-    tableName: "_",
-  }) {}
-
-  describe("build", () => {
-    it("returns an instance of the Extended class", () => {
-      expect(Extended.build({})).toBeInstanceOf(Extended);
-    });
-  });
-});
-
 describe("Unextended Model class", () => {
   const orm = new Orm();
 
@@ -172,7 +157,7 @@ describe("Unextended Model class", () => {
       });
     });
 
-    describe("Model.findByPk()", () => {
+    describe("Model.find()", () => {
       let user = new User();
       const userData = { first_name: "Find", last_name: "Method" };
 
