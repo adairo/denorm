@@ -288,7 +288,8 @@ export default class Orm {
         const payload = allowedKeys.keys().reduce<Record<string, any>>(
           (object, column) => {
             const value = this.getDataValue(column);
-            if (column === Model.primaryKeyColumn && value === null) {
+            if (value === null) {
+              // in case there are default values defined on database, let the db handle it
               return object;
             }
 
